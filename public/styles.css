@@ -1,0 +1,303 @@
+body { font-family: sans-serif; }
+    .msg { display: flex; margin-bottom: 10px; }
+    .bubble {
+      padding: 10px 14px;
+      border-radius: 18px;
+      max-width: 70%;
+      word-break: break-word;
+      position: relative;
+      margin-bottom: 2px;
+      box-shadow: 0 1px 2px #0001;
+    }
+    .bubble.recebida {
+      background: #fff; /* Balão branco */
+      align-self: flex-start;
+      margin-right: auto;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08), 0 1.5px 3px rgba(0,0,0,0.06); /* Sombra leve */
+      position: relative;
+    }
+    .bubble.enviada {
+      background: #d1f8d6;
+      align-self: flex-end;
+      margin-left: auto;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08), 0 1.5px 3px rgba(0,0,0,0.06); /* Sombra leve */
+    }
+    .bubble .data {
+      font-size: 0.8em;
+      color: #888;
+      margin-top: 4px;
+      text-align: right;
+      display: block;
+    }
+    img, video { max-width: 200px; max-height: 200px; }
+    .chat-bg {
+      background: url('img/PrivappFundo.jpg') repeat;
+      background-position: center;
+      background-size: auto;/* Mostra a imagem no tamanho original */
+      background-attachment: local;    /* Fixa o fundo na tela */
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    #mensagens {
+      min-height: 200px;
+      padding: 16px;
+      background: none;
+    }
+    #listaContatos .active { background: #e0e0e0; }
+    .chat-header {
+      background: rgba(255,255,255,0.96);
+      border-radius: 8px 8px 0 0;
+      box-shadow: 0 1px 4px #0001;
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    .chat-footer {
+      background: rgba(255,255,255,0.96);
+      border-radius: 0 0 8px 8px;
+      box-shadow: 0 -1px 4px #0001;
+      border-top: 1px solid #e0e0e0;
+    }
+
+    /* Adicione ao <style> do seu index.html */
+    .toggle-darkmode {
+      background: #222;
+      color: #ffd700;
+      border: none;
+      border-radius: 50%;
+      width: 38px;
+      height: 38px;
+      font-size: 1.3em;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.3s, color 0.3s;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.10);
+      cursor: pointer;
+    }
+    .toggle-darkmode.day {
+      background: #ffd700;
+      color: #222;
+    }
+
+    /* Darkmode geral */
+    body.darkmode {
+      background: #181a1b !important;
+      color: #e0e0e0 !important;
+    }
+    body.darkmode .chat-bg {
+      background: url('img/PrivappFundoEscuro.jpg') repeat !important;
+      background-position: center !important;
+      background-size: auto !important;
+      background-attachment: local !important;
+    }
+    body.darkmode .chat-header,
+    body.darkmode .chat-footer {
+      background: #23272a !important;
+      color: #e0e0e0 !important;
+      border-color: #333 !important;
+    }
+    body.darkmode .bubble.recebida {
+      background: #111a22 !important;
+      color: #e0e0e0 !important;
+    }
+    body.darkmode .bubble.enviada {
+      background: #22584b !important;
+      color: #e0e0e0 !important;
+    }
+    body.darkmode .form-control,
+    body.darkmode input,
+    body.darkmode textarea {
+      background: #23272a !important;
+      color: #e0e0e0 !important;
+      border-color: #444 !important;
+    }
+    body.darkmode .list-group-item {
+      background: #23272a !important;
+      color: #e0e0e0 !important;
+    }
+    body.darkmode .alert-secondary {
+      background: #23272a !important;
+      color: #e0e0e0 !important;
+      border-color: #444 !important;
+    }
+    body.darkmode .btn-primary {
+      background: #3b82f6 !important;
+      border-color: #3b82f6 !important;
+    }
+    body.darkmode .btn-light {
+      background: #23272a !important;
+      color: #ffd700 !important;
+      border-color: #444 !important;
+    }
+    body.darkmode .btn-outline-secondary {
+      color: #e0e0e0 !important;
+      border-color: #444 !important;
+    }
+    body.darkmode .modal-content {
+      background: #23272a !important;
+      color: #e0e0e0 !important;
+    }
+    /* Adicione ao seu <style> */
+    .toggle-darkmode {
+      position: fixed;
+      top: 18px;
+      right: 32px;
+      z-index: 1050;
+      background: #222;
+      color: #ffd700;
+      border: none;
+      border-radius: 50%;
+      width: 38px;
+      height: 38px;
+      font-size: 1.3em;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.3s, color 0.3s;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.10);
+      cursor: pointer;
+    }
+    .toggle-darkmode.day {
+      background: #ffd700;
+      color: #222;
+    }
+    body.darkmode #listaContatos .contact-name-unread {
+  color: #fff !important;
+}
+    .msg-options-btn {
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 1.2em;
+    cursor: pointer;
+    margin-left: 6px;
+    border-radius: 50%;
+    transition: background 0.2s;
+    position: relative;
+    z-index: 2;
+  }
+  .msg-options-btn:hover {
+    background: #eee;
+    color: #222;
+  }
+  body.darkmode .msg-options-btn:hover {
+    background: #23272a;
+    color: #ffd700;
+  }
+  .msg-options-menu {
+    position: absolute;
+    top: 28px;
+    right: 0;
+    min-width: 160px;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px #0002;
+    z-index: 1000;
+    padding: 0;
+    margin: 0;
+    display: none;
+    border: 1px solid #eee;
+    overflow: hidden;
+  }
+  .msg-options-menu.show {
+    display: block;
+  }
+  .msg-options-menu button {
+    width: 100%;
+    background: none;
+    border: none;
+    text-align: left;
+    padding: 10px 16px;
+    font-size: 1em;
+    color: #222;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .msg-options-menu button:hover {
+    background: #f5f5f5;
+  }
+  body.darkmode .msg-options-menu {
+    background: #23272a;
+    border-color: #444;
+  }
+  body.darkmode .msg-options-menu button {
+    color: #e0e0e0;
+  }
+  body.darkmode .msg-options-menu button:hover {
+    background: #181a1b;
+  }
+  .msg-options-btn.left {
+  position: absolute;
+  left: 0;
+  top: 0;
+  margin-left: 0;
+  margin-top: 0;
+  margin-right: auto;
+}
+  /* Ajuste para a seta de opções das mensagens recebidas no privado ficar no canto superior direito */
+.msg-options-btn.left {
+  position: absolute;
+  right: 0;
+  top: 0;
+  left: auto;
+  margin-right: 0;
+  margin-left: 0;
+  margin-top: 0;
+}
+.msg-reactions {
+  margin-top: 4px;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.reaction {
+  background: #eee;
+  border-radius: 12px;
+  padding: 2px 8px;
+  font-size: 1em;
+  cursor: pointer;
+}
+.btn-reagir {
+  background: none;
+  border: none;
+  font-size: 1.2em;
+  cursor: pointer;
+}
+/* Esconde o nome do arquivo padrão do input file */
+input[type="file"]::-webkit-file-upload-button {
+  visibility: hidden;
+}
+input[type="file"]::before {
+  content: 'Escolher arquivo';
+  display: inline-block;
+  background: #eee;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 4px 12px;
+  outline: none;
+  white-space: nowrap;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: pointer;
+  font-size: 1em;
+  color: #222;
+}
+input[type="file"]:focus::before {
+  border-color: #3b82f6;
+}
+input[type="file"] {
+  color: transparent;
+}
+
+/* Força o checkbox a aparecer como padrão */
+#toggleNotificacaoContinua {
+  appearance: auto !important;
+  -webkit-appearance: checkbox !important;
+  width: 1.2em !important;
+  height: 1.2em !important;
+  position: static !important;
+  margin: 0 6px 0 0 !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  background: none !important;
+}

@@ -1,0 +1,10 @@
+{
+  "realm": "meu-bot",
+  "auth-server-url": "http://localhost:8080/",
+  "ssl-required": "external",
+  "resource": "meu-bot-backend",
+  "credentials": {
+    "secret": "PQA9lKhUKKIHaqlv7zZKUn44TIttVOJo"
+  },
+  "confidential-port": 0
+}

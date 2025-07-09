@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Meu WhatsApp Web Clone</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+  <script type="module" src="https://cdn.jsdelivr.net/npm/emoji-picker-element@^1/index.js"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <button id="toggle-darkmode" class="toggle-darkmode" title="Alternar modo noturno/dia">🌙</button>
+  <emoji-picker id="emojiPicker" style="position:fixed;z-index:3000;display:none;"></emoji-picker>
+  <div class="container-fluid">
+    <div class="row">
+      <!-- Lista de conversas -->
+      <div class="col-md-4 border-end" style="height: 90vh; overflow-y: auto;">
+        <div class="d-flex align-items-center justify-content-between">
+          <h4>Conversas</h4>
+          <div>
+            <button id="btnAddContato" class="btn btn-success btn-sm me-2">Adicionar Contato</button>
+            <button id="btnLimpar" class="btn btn-danger btn-sm">Limpar</button>
+          </div>
+        </div>
+        <input type="text" id="buscaContato" class="form-control mb-2" placeholder="Buscar contato..." oninput="filtrarContatos()">
+        <ul id="listaContatos" class="list-group"></ul>
+      </div>
+      <!-- Área de chat -->
+      <div class="col-md-8 chat-bg d-flex flex-column" style="height: 90vh; padding: 0;">
+        <!-- Cabeçalho espesso -->
+        <div class="chat-header d-flex align-items-center px-4" style="min-height:70px;">
+          <h4 id="nomeContato" class="mb-0">Selecione uma conversa</h4>
+        </div>
+        <!-- Área de mensagens -->
+        <div style="flex:1; overflow-y:auto;">
+          <input type="text" id="busca" class="form-control mb-2 mt-2" placeholder="Buscar mensagem nesta conversa...">
+          <div id="mensagens"></div>
+        </div>
+        <!-- Rodapé espesso -->
+        <div class="chat-footer px-4 py-3">
+          <div id="filePreview" style="display:none; margin-bottom:8px;">
+            <div class="alert alert-secondary d-flex align-items-center justify-content-between py-2 px-3 mb-2" style="max-width:350px;">
+              <span id="filePreviewName" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:250px;"></span>
+              <button type="button" class="btn-close ms-2" aria-label="Remover" onclick="removerArquivo()"></button>
+            </div>
+          </div>
+          <form id="formEnvio" class="d-flex gap-2 mb-2 position-relative">
+            <button type="button" id="btnClip" class="btn btn-light" style="font-size:1.4em;line-height:1;padding:0 10px;position:relative;">
+              📎
+            </button>
+            <input type="text" id="texto" class="form-control" placeholder="Mensagem" style="flex:1;">
+            <button type="submit" class="btn btn-primary">Enviar</button>
+            <!-- Popover do anexo -->
+            <div id="popoverAnexo" class="card shadow-sm p-2" style="display:none;position:absolute;bottom:45px;left:0;z-index:10;min-width:220px;">
+              <label class="form-label mb-1" style="font-size:0.95em;">Anexar arquivo</label>
+              <input type="file" id="arquivoMidiaPopover" class="form-control form-control-sm">
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal para adicionar/editar contato -->
+  <div class="modal fade" id="modalContato" tabindex="-1" aria-labelledby="modalContatoLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <form class="modal-content" id="formModalContato">
+        <div class="modal-header">
+          <h5 class="modal-title" id="modalContatoLabel">Adicionar/Editar Contato ou Grupo</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label for="numeroContato" class="form-label">Número ou ID do Grupo</label>
+            <input type="text" class="form-control" id="numeroContato" required>
+          </div>
+          <div class="mb-3">
+            <label for="nomeContatoModal" class="form-label">Nome</label>
+            <input type="text" class="form-control" id="nomeContatoModal" required>
+          </div>
+          <!-- Personalização de notificação -->
+          <hr>
+          <div class="mb-3">
+            <label class="form-label">Som de notificação personalizado</label>
+            <div class="input-group">
+              <button type="button" class="btn btn-outline-primary" id="btnEscolherSom">Escolher arquivo</button>
+              <span id="nomeSomSelecionado" class="badge bg-info text-dark ms-2" style="display:none;align-self:center;"></span>
+              <button type="button" class="btn btn-outline-secondary" id="btnTocarSom">🔊</button>
+              <button type="button" class="btn btn-outline-danger" id="btnRemoverSom">Remover</button>
+            </div>
+            <input type="file" id="inputSomNotificacao" accept="audio/*" style="display:none;">
+          </div>
+          <div class="form-check mt-3">
+            <input class="form-check-input" type="checkbox" id="toggleNotificacaoContinua">
+            <label class="form-check-label" for="toggleNotificacaoContinua">
+              Notificações contínuas
+            </label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-success">Salvar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal de confirmação estilizado -->
+  <div class="modal fade" id="modalConfirm" tabindex="-1" aria-labelledby="modalConfirmLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <form class="modal-content" id="formModalConfirm">
+        <div class="modal-header">
+          <h5 class="modal-title" id="modalConfirmLabel">Confirmação</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+        </div>
+        <div class="modal-body">
+          <p id="modalConfirmMsg"></p>
+          <input type="text" class="form-control" id="modalConfirmInput" placeholder='Digite "delete" para confirmar'>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-danger">Confirmar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Adicione este modal logo antes do   <script src="script.js"></script>
+</body> -->
+  <div class="modal fade" id="pdfModal" tabindex="-1" aria-labelledby="pdfModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl" style="max-width:90vw;">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="pdfModalLabel">Visualizar PDF</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+        </div>
+        <div class="modal-body" style="height:80vh;">
+          <iframe id="pdfViewer" src="" style="width:100%;height:100%;border:none;"></iframe>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal para visualizar imagem -->
+  <div class="modal fade" id="imgModal" tabindex="-1" aria-labelledby="imgModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" style="max-width:90vw;">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="imgModalLabel">Visualizar Imagem</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+        </div>
+        <div class="modal-body text-center" style="background:#222;">
+          <img id="imgViewer" src="" style="max-width:100%;max-height:70vh;border-radius:8px;box-shadow:0 2px 16px #0008;">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="https://cdn.jsdelivr.net/npm/emoji-picker-element@^1/index.js"></script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>

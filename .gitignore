@@ -92,7 +92,9 @@ uploads/
 
 # Arquivos de dados (opcional - remova se quiser versionar)
 messages.json
+messages.json.backup
 groupPhotos.json
+*.db
 
 # Arquivos do sistema
 .DS_Store

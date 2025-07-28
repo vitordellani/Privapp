@@ -8,10 +8,14 @@ const qrcode = require('qrcode-terminal');
 const multer = require('multer');
 const session = require('express-session');
 const Keycloak = require('keycloak-connect');
+const Database = require('./database');
 
 const MEDIA_DIR = path.join(__dirname, 'media');
 const MESSAGES_FILE = path.join(__dirname, 'messages.json');
 if (!fs.existsSync(MEDIA_DIR)) fs.mkdirSync(MEDIA_DIR);
+
+// Inicializar banco de dados
+const db = new Database();
 
 const upload = multer({ dest: MEDIA_DIR });
 
@@ -63,6 +67,14 @@ client.on('ready', async () => {
     meuNome = 'Você';
     meuNumero = null;
   }
+  
+  // Migrar dados do JSON para SQLite se necessário
+  try {
+    await db.migrateFromJSON(MESSAGES_FILE);
+  } catch (error) {
+    console.error('Erro na migração:', error);
+  }
+  
   // Atualiza as fotos dos grupos ao iniciar
   atualizarFotosGrupos();
   // (Opcional) Atualize a cada X minutos:
@@ -108,18 +120,6 @@ async function atualizarFotosGrupos() {
 
 // Função para salvar mensagens recebidas
 async function saveMessage(msg, mediaFilename, mimetype, mediaError = null) {
-  let messages = [];
-  if (fs.existsSync(MESSAGES_FILE)) {
-    try {
-      messages = JSON.parse(fs.readFileSync(MESSAGES_FILE, 'utf8'));
-    } catch {
-      messages = [];
-    }
-  }
-
-  // Evita duplicidade: remove mensagem antiga com mesmo id
-  messages = messages.filter(m => m.id !== msg.id.id);
-
   const isGroup = msg.from && msg.from.endsWith('@g.us');
   let groupName = null;
   let senderName = null;
@@ -152,23 +152,27 @@ async function saveMessage(msg, mediaFilename, mimetype, mediaError = null) {
   }
 
   const obj = {
-    from: msg.from,
-    to: msg.to,
-    body: msg.body,
+    from: msg.from || 'unknown',
+    to: msg.to || 'unknown',
+    body: msg.body || '',
     timestamp: Date.now(),
     mediaFilename,
     mimetype,
     fromMe: msg.fromMe || false,
-    senderName,
+    senderName: senderName || 'Unknown',
     groupName,
     photoUrl,
     mediaError,
     reactions: [], // <-- novo campo
-    id: msg.id.id // ou msg.id, dependendo do formato
+    id: msg.id?.id || `temp_${Date.now()}` // ou msg.id, dependendo do formato
   };
-  messages.push(obj);
-  fs.writeFileSync(MESSAGES_FILE, JSON.stringify(messages, null, 2));
-  io.emit('nova-mensagem', obj);
+  
+  try {
+    await db.saveMessage(obj);
+    io.emit('nova-mensagem', obj);
+  } catch (error) {
+    console.error('Erro ao salvar mensagem no banco:', error);
+  }
 }
 
 // Evento para mensagens recebidas (e enviadas pelo próprio bot)
@@ -233,72 +237,38 @@ client.on('message_reaction', async (reaction) => {
 
   console.log('[BACKEND][message_reaction][PARSED]:', { emoji, event, msgId, sender });
 
-  let messages = [];
-  if (fs.existsSync(MESSAGES_FILE)) {
-    try {
-      messages = JSON.parse(fs.readFileSync(MESSAGES_FILE, 'utf8'));
-    } catch {
-      messages = [];
+  try {
+    if (event === 'add' && emoji && sender && msgId) {
+      await db.addReaction(msgId, emoji, sender);
+      const reactions = await db.getMessageReactions(msgId);
+      io.emit('reacao-mensagem', { msgId, reactions });
+      console.log('[BACKEND][message_reaction] Reação adicionada:', emoji, sender);
     }
-  }
-  let msg = messages.find(m => m.id === msgId);
-  console.log('[BACKEND][message_reaction] Encontrou msg?', !!msg, 'ID procurado:', msgId);
-
-  if (!msg) {
-    try {
-      const chat = await client.getChatById(reaction.msgId.remote);
-      const recentMsgs = await chat.fetchMessages({ limit: 50 });
-      for (const m of recentMsgs) {
-        if (!messages.find(x => x.id === m.id.id)) {
-          await saveMessage(m, null, null, null);
-        }
-      }
-      if (fs.existsSync(MESSAGES_FILE)) {
-        try {
-          messages = JSON.parse(fs.readFileSync(MESSAGES_FILE, 'utf8'));
-        } catch {
-          messages = [];
-        }
-      }
-      msg = messages.find(m => m.id === msgId);
-      console.log('[BACKEND][message_reaction] Após fetchMessages, encontrou msg?', !!msg);
-    } catch (e) {
-      console.log('[BACKEND][message_reaction] Erro ao buscar mensagens para reação:', e);
-    }
-  }
-  if (msg && emoji && sender && event) {
-    if (!msg.reactions) msg.reactions = [];
-    const idx = msg.reactions.findIndex(r => r.emoji === emoji && r.user === sender);
-    console.log('[BACKEND][message_reaction] Antes:', JSON.stringify(msg.reactions));
-    if (event === 'add' && idx === -1) {
-      msg.reactions.push({ emoji, user: sender });
-      console.log('[BACKEND][message_reaction] Adicionou reação:', emoji, sender);
-    }
-    fs.writeFileSync(MESSAGES_FILE, JSON.stringify(messages, null, 2));
-    io.emit('reacao-mensagem', { msgTimestamp: msg.timestamp, reactions: msg.reactions });
-    console.log('[BACKEND][message_reaction] Emitiu reacao-mensagem:', { msgTimestamp: msg.timestamp, reactions: msg.reactions });
-  } else {
-    console.log('[BACKEND][message_reaction] Dados insuficientes para atualizar reação!', { emoji, event, sender });
+  } catch (error) {
+    console.error('[BACKEND][message_reaction] Erro ao processar reação:', error);
   }
 });
 
 // API para buscar mensagens
-app.get('/api/messages', (req, res) => {
-  let messages = [];
-  if (fs.existsSync(MESSAGES_FILE)) {
-    try {
-      messages = JSON.parse(fs.readFileSync(MESSAGES_FILE, 'utf8'));
-    } catch {
-      messages = [];
-    }
+app.get('/api/messages', async (req, res) => {
+  try {
+    const messages = await db.getAllMessages();
+    res.json(messages);
+  } catch (error) {
+    console.error('Erro ao buscar mensagens:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
   }
-  res.json(messages);
 });
 
 // Limpar mensagens
-app.post('/api/clear', (req, res) => {
-  fs.writeFileSync(MESSAGES_FILE, '[]');
-  res.json({ ok: true });
+app.post('/api/clear', async (req, res) => {
+  try {
+    await db.clearAllMessages();
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Erro ao limpar mensagens:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
 });
 
 // Enviar mensagem via WhatsApp
@@ -324,16 +294,8 @@ app.post('/api/send', async (req, res) => {
       reactions: [],
       id: sentMsg.id.id // Corrigido: usa o id da mensagem enviada
     };
-    let messages = [];
-    if (fs.existsSync(MESSAGES_FILE)) {
-      try {
-        messages = JSON.parse(fs.readFileSync(MESSAGES_FILE, 'utf8'));
-      } catch {
-        messages = [];
-      }
-    }
-    messages.push(obj);
-    fs.writeFileSync(MESSAGES_FILE, JSON.stringify(messages, null, 2));
+    
+    await db.saveMessage(obj);
     io.emit('nova-mensagem', obj);
 
     res.json({ ok: true });
@@ -368,30 +330,22 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
       }
     }
     let obj = {
-      from: meuNumero,
-      to: to,
+      from: meuNumero || 'unknown',
+      to: to || 'unknown',
       body: null,
       timestamp: Date.now(),
       mediaFilename: file.filename,
       mimetype: file.mimetype,
       fromMe: true,
-      senderName: meuNome || meuNumero,
+      senderName: meuNome || meuNumero || 'Unknown',
       groupName: groupName,
       photoUrl,
       mediaError: null,
       reactions: [],
-      id: null // Você pode tentar obter o id real se necessário
+      id: `media_${Date.now()}` // ID temporário para mídia
     };
-    let messages = [];
-    if (fs.existsSync(MESSAGES_FILE)) {
-      try {
-        messages = JSON.parse(fs.readFileSync(MESSAGES_FILE, 'utf8'));
-      } catch {
-        messages = [];
-      }
-    }
-    messages.push(obj);
-    fs.writeFileSync(MESSAGES_FILE, JSON.stringify(messages, null, 2));
+    
+    await db.saveMessage(obj);
     io.emit('nova-mensagem', obj);
 
     res.json({ ok: true });
@@ -400,80 +354,81 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
   }
 });
 
-app.post('/api/upload-manual', upload.single('file'), (req, res) => {
+app.post('/api/upload-manual', upload.single('file'), async (req, res) => {
   const { timestamp } = req.body;
   const file = req.file;
   if (!file || !timestamp) return res.status(400).json({ error: 'Dados inválidos' });
 
-  let messages = [];
-  if (fs.existsSync(MESSAGES_FILE)) {
-    try {
-      messages = JSON.parse(fs.readFileSync(MESSAGES_FILE, 'utf8'));
-    } catch {
-      messages = [];
-    }
+  try {
+    const messages = await db.getAllMessages();
+    const msg = messages.find(m => m.timestamp == timestamp);
+    if (!msg) return res.status(404).json({ error: 'Mensagem não encontrada' });
+
+    const ext = path.extname(file.originalname) || '';
+    const mediaFilename = `media_manual_${Date.now()}${ext}`;
+    const mediaPath = path.join(MEDIA_DIR, mediaFilename);
+    fs.copyFileSync(file.path, mediaPath);
+    fs.unlinkSync(file.path);
+
+    // Atualizar mensagem no banco
+    const updatedMsg = {
+      ...msg,
+      mediaFilename: mediaFilename,
+      mimetype: file.mimetype,
+      mediaError: null
+    };
+    
+    await db.saveMessage(updatedMsg);
+    io.emit('nova-mensagem', updatedMsg);
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Erro ao fazer upload manual:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
   }
-
-  const msg = messages.find(m => m.timestamp == timestamp);
-  if (!msg) return res.status(404).json({ error: 'Mensagem não encontrada' });
-
-  const ext = path.extname(file.originalname) || '';
-  const mediaFilename = `media_manual_${Date.now()}${ext}`;
-  const mediaPath = path.join(MEDIA_DIR, mediaFilename);
-  fs.copyFileSync(file.path, mediaPath);
-  fs.unlinkSync(file.path);
-
-  msg.mediaFilename = mediaFilename;
-  msg.mimetype = file.mimetype;
-  msg.mediaError = null; // remove o erro
-
-  fs.writeFileSync(MESSAGES_FILE, JSON.stringify(messages, null, 2));
-  io.emit('nova-mensagem', msg);
-
-  res.json({ ok: true });
 });
 
 app.post('/api/react', async (req, res) => {
   const { msgTimestamp, emoji, user } = req.body;
   if (!msgTimestamp || !emoji || !user) return res.status(400).json({ error: 'Dados inválidos' });
 
-  let messages = [];
-  if (fs.existsSync(MESSAGES_FILE)) {
-    try {
-      messages = JSON.parse(fs.readFileSync(MESSAGES_FILE, 'utf8'));
-    } catch {
-      messages = [];
-    }
-  }
-  const msg = messages.find(m => m.timestamp == msgTimestamp);
-  if (!msg) return res.status(404).json({ error: 'Mensagem não encontrada' });
+  try {
+    const messages = await db.getAllMessages();
+    const msg = messages.find(m => m.timestamp == msgTimestamp);
+    if (!msg) return res.status(404).json({ error: 'Mensagem não encontrada' });
 
-  if (!msg.reactions) msg.reactions = [];
+    // Verificar se a reação já existe
+    const reactions = await db.getMessageReactions(msg.id);
+    const existingReaction = reactions.find(r => r.emoji === emoji && r.user === user);
 
-  // Remove reação igual do mesmo usuário (toggle)
-  const idx = msg.reactions.findIndex(r => r.emoji === emoji && r.user === user);
-  if (idx >= 0) {
-    msg.reactions.splice(idx, 1);
-  } else {
-    msg.reactions.push({ emoji, user });
-    // MVP: enviar reação para o WhatsApp
-    try {
-      // Busque a mensagem real pelo ID (você precisa salvar o ID do WhatsApp na sua estrutura de mensagem)
-      if (msg.id) {
-        const chat = await client.getChatById(msg.from);
-        const message = await chat.fetchMessages({ limit: 50 }).then(msgs => msgs.find(m => m.id.id == msg.id));
-        if (message) {
-          await message.react(emoji);
+    if (existingReaction) {
+      // Remove reação
+      await db.removeReaction(msg.id, emoji, user);
+    } else {
+      // Adiciona reação
+      await db.addReaction(msg.id, emoji, user);
+      
+      // MVP: enviar reação para o WhatsApp
+      try {
+        if (msg.id) {
+          const chat = await client.getChatById(msg.from);
+          const message = await chat.fetchMessages({ limit: 50 }).then(msgs => msgs.find(m => m.id.id == msg.id));
+          if (message) {
+            await message.react(emoji);
+          }
         }
+      } catch (e) {
+        console.log('Erro ao enviar reação para o WhatsApp:', e);
       }
-    } catch (e) {
-      console.log('Erro ao enviar reação para o WhatsApp:', e);
     }
-  }
 
-  fs.writeFileSync(MESSAGES_FILE, JSON.stringify(messages, null, 2));
-  io.emit('reacao-mensagem', { msgTimestamp, reactions: msg.reactions });
-  res.json({ ok: true, reactions: msg.reactions });
+    const updatedReactions = await db.getMessageReactions(msg.id);
+    io.emit('reacao-mensagem', { msgTimestamp, reactions: updatedReactions });
+    res.json({ ok: true, reactions: updatedReactions });
+  } catch (error) {
+    console.error('Erro ao processar reação:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
 });
 
 // WebSocket para atualização em tempo real
@@ -512,16 +467,14 @@ app.get('/protegido', (req, res) => {
 });
 
 // Outras rotas protegidas (exemplo)
-app.get('/api/messages', (req, res) => {
-  let messages = [];
-  if (fs.existsSync(MESSAGES_FILE)) {
-    try {
-      messages = JSON.parse(fs.readFileSync(MESSAGES_FILE, 'utf8'));
-    } catch {
-      messages = [];
-    }
+app.get('/api/messages', async (req, res) => {
+  try {
+    const messages = await db.getAllMessages();
+    res.json(messages);
+  } catch (error) {
+    console.error('Erro ao buscar mensagens:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
   }
-  res.json(messages);
 });
 
 app.post('/api/send', async (req, res) => {
@@ -532,30 +485,22 @@ app.post('/api/send', async (req, res) => {
 
     // Salva manualmente a mensagem enviada
     const obj = {
-      from: meuNumero,
-      to: to,
-      body: message,
+      from: meuNumero || 'unknown',
+      to: to || 'unknown',
+      body: message || '',
       timestamp: Date.now(),
       mediaFilename: null,
       mimetype: null,
       fromMe: true,
-      senderName: meuNome || meuNumero,
+      senderName: meuNome || meuNumero || 'Unknown',
       groupName: to.endsWith('@g.us') ? null : undefined,
       photoUrl: null,
       mediaError: null,
       reactions: [],
-      id: sentMsg.id.id // Corrigido: usa o id da mensagem enviada
+      id: sentMsg?.id?.id || `sent_${Date.now()}` // Corrigido: usa o id da mensagem enviada
     };
-    let messages = [];
-    if (fs.existsSync(MESSAGES_FILE)) {
-      try {
-        messages = JSON.parse(fs.readFileSync(MESSAGES_FILE, 'utf8'));
-      } catch {
-        messages = [];
-      }
-    }
-    messages.push(obj);
-    fs.writeFileSync(MESSAGES_FILE, JSON.stringify(messages, null, 2));
+    
+    await db.saveMessage(obj);
     io.emit('nova-mensagem', obj);
 
     res.json({ ok: true });

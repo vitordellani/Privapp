@@ -175,10 +175,21 @@ async function saveMessage(msg, mediaFilename, mimetype, mediaError = null) {
   }
 }
 
+// Variável para rastrear mensagens já processadas via API
+let mensagensEnviadasViaAPI = new Set();
+// Variável para rastrear mensagens já processadas via socket
+let mensagensProcessadasViaSocket = new Set();
+
 // Evento para mensagens recebidas (e enviadas pelo próprio bot)
 client.on('message_create', async (msg) => {
-  // Só salva se for enviada por você (fromMe true)
-  if (msg.fromMe) {
+  // Verifica se a mensagem já foi processada via socket
+  const socketKey = `${msg.id?.id}_${Date.now()}`;
+  if (mensagensProcessadasViaSocket.has(socketKey)) {
+    return; // Ignora mensagens já processadas
+  }
+  
+  // Só salva se for enviada por você (fromMe true) E não foi enviada via API
+  if (msg.fromMe && !mensagensEnviadasViaAPI.has(msg.id?.id)) {
     let mediaFilename = null;
     let mimetype = null;
     let mediaError = null;
@@ -273,10 +284,59 @@ app.post('/api/clear', async (req, res) => {
 
 // Enviar mensagem via WhatsApp
 app.post('/api/send', async (req, res) => {
-  const { to, message } = req.body;
-  console.log(`[ENVIO] Tentando enviar para: ${to} | body: "${message}"`);
+  const { to, message, replyTo } = req.body;
+  console.log(`[ENVIO] Tentando enviar para: ${to} | body: "${message}" | replyTo:`, replyTo);
   try {
-    const sentMsg = await client.sendMessage(to, message);
+    let sentMsg;
+    
+    // Se há uma mensagem para responder, usa o método de resposta do WhatsApp
+    if (replyTo && replyTo.timestamp) {
+      // Busca a mensagem original no banco para obter o ID correto
+      const originalMessages = await db.getAllMessages();
+      const originalMsg = originalMessages.find(m => m.timestamp === replyTo.timestamp);
+      
+      if (originalMsg && originalMsg.id) {
+        try {
+          // Busca a mensagem no WhatsApp usando o chat e o ID
+          const chat = await client.getChatById(to);
+          const quotedMessage = await chat.fetchMessages({ limit: 100 }).then(msgs => 
+            msgs.find(m => m.id.id === originalMsg.id)
+          );
+          
+          if (quotedMessage) {
+            // Envia como resposta usando a mensagem encontrada
+            sentMsg = await client.sendMessage(to, message, {
+              quotedMessageId: quotedMessage.id._serialized
+            });
+            console.log(`[ENVIO] Mensagem enviada como resposta para: ${originalMsg.id}`);
+          } else {
+            // Se não encontrar a mensagem, envia normalmente
+            console.log(`[ENVIO] Mensagem original não encontrada, enviando normalmente`);
+            sentMsg = await client.sendMessage(to, message);
+          }
+        } catch (error) {
+          console.log(`[ENVIO] Erro ao buscar mensagem para resposta:`, error.message);
+          // Envia normalmente em caso de erro
+          sentMsg = await client.sendMessage(to, message);
+        }
+      } else {
+        // Se não encontrar a mensagem original, envia normalmente
+        console.log(`[ENVIO] Mensagem original não encontrada no banco, enviando normalmente`);
+        sentMsg = await client.sendMessage(to, message);
+      }
+    } else {
+      // Envio normal
+      sentMsg = await client.sendMessage(to, message);
+    }
+
+    // Marca a mensagem como enviada via API para evitar duplicação
+    if (sentMsg.id?.id) {
+      mensagensEnviadasViaAPI.add(sentMsg.id.id);
+      // Remove da lista após 30 segundos para evitar acúmulo de memória
+      setTimeout(() => {
+        mensagensEnviadasViaAPI.delete(sentMsg.id.id);
+      }, 30000);
+    }
 
     // Salva manualmente a mensagem enviada
     const obj = {
@@ -292,10 +352,16 @@ app.post('/api/send', async (req, res) => {
       photoUrl: null,
       mediaError: null,
       reactions: [],
-      id: sentMsg.id.id // Corrigido: usa o id da mensagem enviada
+      id: sentMsg.id.id,
+      replyTo: replyTo || null // Inclui informações de resposta
     };
     
     await db.saveMessage(obj);
+    
+    // Marca como processada via socket para evitar duplicação
+    const socketKey = `${sentMsg.id.id}_${Date.now()}`;
+    mensagensProcessadasViaSocket.add(socketKey);
+    
     io.emit('nova-mensagem', obj);
 
     res.json({ ok: true });
@@ -312,11 +378,20 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
   if (!file) return res.status(400).json({ error: 'Arquivo não enviado' });
   try {
     const media = fs.readFileSync(file.path);
-    await client.sendMessage(to, new (require('whatsapp-web.js').MessageMedia)(
+    const sentMsg = await client.sendMessage(to, new (require('whatsapp-web.js').MessageMedia)(
       file.mimetype,
       media.toString('base64'),
       file.originalname
     ));
+
+    // Marca a mensagem como enviada via API para evitar duplicação
+    if (sentMsg.id?.id) {
+      mensagensEnviadasViaAPI.add(sentMsg.id.id);
+      // Remove da lista após 30 segundos para evitar acúmulo de memória
+      setTimeout(() => {
+        mensagensEnviadasViaAPI.delete(sentMsg.id.id);
+      }, 30000);
+    }
 
     const isGroup = to.endsWith('@g.us');
     let groupName = null;
@@ -389,13 +464,33 @@ app.post('/api/upload-manual', upload.single('file'), async (req, res) => {
 });
 
 app.post('/api/react', async (req, res) => {
-  const { msgTimestamp, emoji, user } = req.body;
-  if (!msgTimestamp || !emoji || !user) return res.status(400).json({ error: 'Dados inválidos' });
+  const { msgTimestamp, msgId, emoji, user } = req.body;
+  if ((!msgTimestamp && !msgId) || !emoji || !user) {
+    return res.status(400).json({ error: 'Dados inválidos - precisa de msgTimestamp ou msgId' });
+  }
 
   try {
     const messages = await db.getAllMessages();
-    const msg = messages.find(m => m.timestamp == msgTimestamp);
-    if (!msg) return res.status(404).json({ error: 'Mensagem não encontrada' });
+    let msg = null;
+    
+    // Tenta buscar por ID primeiro (para mensagens enviadas pela interface)
+    if (msgId) {
+      msg = messages.find(m => m.id === msgId);
+      console.log(`[REACAO] Buscando por ID: ${msgId}, encontrada: ${!!msg}`);
+    }
+    
+    // Se não encontrou por ID, tenta por timestamp (para compatibilidade)
+    if (!msg && msgTimestamp) {
+      msg = messages.find(m => m.timestamp == msgTimestamp);
+      console.log(`[REACAO] Buscando por timestamp: ${msgTimestamp}, encontrada: ${!!msg}`);
+    }
+    
+    if (!msg) {
+      console.log(`[REACAO] Mensagem não encontrada. ID: ${msgId}, Timestamp: ${msgTimestamp}`);
+      return res.status(404).json({ error: 'Mensagem não encontrada' });
+    }
+
+    console.log(`[REACAO] Mensagem encontrada: ID=${msg.id}, fromMe=${msg.fromMe}, from=${msg.from}`);
 
     // Verificar se a reação já existe
     const reactions = await db.getMessageReactions(msg.id);
@@ -403,30 +498,166 @@ app.post('/api/react', async (req, res) => {
 
     if (existingReaction) {
       // Remove reação
+      console.log(`[REACAO] Removendo reação: ${emoji} de ${user}`);
       await db.removeReaction(msg.id, emoji, user);
-    } else {
-      // Adiciona reação
-      await db.addReaction(msg.id, emoji, user);
       
-      // MVP: enviar reação para o WhatsApp
+      // Remover reação do WhatsApp também
       try {
         if (msg.id) {
-          const chat = await client.getChatById(msg.from);
-          const message = await chat.fetchMessages({ limit: 50 }).then(msgs => msgs.find(m => m.id.id == msg.id));
-          if (message) {
-            await message.react(emoji);
+          const chatId = msg.fromMe ? msg.to : msg.from;
+          
+          if (chatId) {
+            console.log(`[REACAO] Tentando remover reação do WhatsApp. Chat: ${chatId}, MsgID: ${msg.id}`);
+            const chat = await client.getChatById(chatId);
+            
+            // Tenta diferentes estratégias de busca
+            let message = null;
+            let searchStrategy = '';
+            
+            // Estratégia 1: Busca com limite pequeno
+            try {
+              const messages = await chat.fetchMessages({ limit: 50 });
+              message = messages.find(m => m.id.id === msg.id);
+              if (message) searchStrategy = 'limite 50';
+            } catch (e) {
+              console.log(`[REACAO] Erro na busca com limite 50:`, e.message);
+            }
+            
+            // Estratégia 2: Busca com limite maior
+            if (!message) {
+              try {
+                const messages = await chat.fetchMessages({ limit: 100 });
+                message = messages.find(m => m.id.id === msg.id);
+                if (message) searchStrategy = 'limite 100';
+              } catch (e) {
+                console.log(`[REACAO] Erro na busca com limite 100:`, e.message);
+              }
+            }
+            
+            // Estratégia 3: Busca com limite muito maior
+            if (!message) {
+              try {
+                const messages = await chat.fetchMessages({ limit: 500 });
+                message = messages.find(m => m.id.id === msg.id);
+                if (message) searchStrategy = 'limite 500';
+              } catch (e) {
+                console.log(`[REACAO] Erro na busca com limite 500:`, e.message);
+              }
+            }
+            
+            // Estratégia 4: Busca por ID direto (se disponível)
+            if (!message && msg.id) {
+              try {
+                message = await chat.fetchMessage(msg.id);
+                if (message) searchStrategy = 'fetch direto';
+              } catch (e) {
+                console.log(`[REACAO] Erro na busca direta:`, e.message);
+              }
+            }
+            
+            if (message) {
+              // Para remover reação, envia o mesmo emoji novamente
+              await message.react(emoji);
+              console.log(`[REACAO] Reação removida com sucesso do WhatsApp: ${emoji} (estratégia: ${searchStrategy})`);
+            } else {
+              console.log(`[REACAO] Mensagem não encontrada no WhatsApp para remover reação`);
+            }
           }
         }
       } catch (e) {
-        console.log('Erro ao enviar reação para o WhatsApp:', e);
+        console.log('[REACAO] Erro ao remover reação do WhatsApp:', e.message);
+      }
+    } else {
+      // Adiciona reação
+      console.log(`[REACAO] Adicionando reação: ${emoji} de ${user}`);
+      await db.addReaction(msg.id, emoji, user);
+      
+      // Enviar reação para o WhatsApp
+      try {
+        if (msg.id) {
+          // Para mensagens enviadas, busca no chat de destino (msg.to)
+          // Para mensagens recebidas, busca no chat de origem (msg.from)
+          const chatId = msg.fromMe ? msg.to : msg.from;
+          
+          if (chatId) {
+            console.log(`[REACAO] Tentando enviar reação para WhatsApp. Chat: ${chatId}, MsgID: ${msg.id}, fromMe: ${msg.fromMe}`);
+            const chat = await client.getChatById(chatId);
+            
+            // Tenta diferentes estratégias de busca
+            let message = null;
+            let searchStrategy = '';
+            
+            // Estratégia 1: Busca com limite pequeno
+            try {
+              const messages = await chat.fetchMessages({ limit: 50 });
+              message = messages.find(m => m.id.id === msg.id);
+              if (message) searchStrategy = 'limite 50';
+            } catch (e) {
+              console.log(`[REACAO] Erro na busca com limite 50:`, e.message);
+            }
+            
+            // Estratégia 2: Busca com limite maior
+            if (!message) {
+              try {
+                const messages = await chat.fetchMessages({ limit: 100 });
+                message = messages.find(m => m.id.id === msg.id);
+                if (message) searchStrategy = 'limite 100';
+              } catch (e) {
+                console.log(`[REACAO] Erro na busca com limite 100:`, e.message);
+              }
+            }
+            
+            // Estratégia 3: Busca com limite muito maior
+            if (!message) {
+              try {
+                const messages = await chat.fetchMessages({ limit: 500 });
+                message = messages.find(m => m.id.id === msg.id);
+                if (message) searchStrategy = 'limite 500';
+              } catch (e) {
+                console.log(`[REACAO] Erro na busca com limite 500:`, e.message);
+              }
+            }
+            
+            // Estratégia 4: Busca por ID direto (se disponível)
+            if (!message && msg.id) {
+              try {
+                message = await chat.fetchMessage(msg.id);
+                if (message) searchStrategy = 'fetch direto';
+              } catch (e) {
+                console.log(`[REACAO] Erro na busca direta:`, e.message);
+              }
+            }
+            
+            if (message) {
+              await message.react(emoji);
+              console.log(`[REACAO] Reação enviada com sucesso para WhatsApp: ${emoji} (estratégia: ${searchStrategy})`);
+            } else {
+              console.log(`[REACAO] Mensagem não encontrada no WhatsApp após todas as estratégias. ID: ${msg.id}`);
+              console.log(`[REACAO] Chat: ${chatId}, fromMe: ${msg.fromMe}`);
+            }
+          } else {
+            console.log(`[REACAO] Chat ID não encontrado. fromMe: ${msg.fromMe}, from: ${msg.from}, to: ${msg.to}`);
+          }
+        }
+      } catch (e) {
+        console.log('[REACAO] Erro ao enviar reação para o WhatsApp:', e.message);
+        console.log('[REACAO] Stack trace:', e.stack);
       }
     }
 
     const updatedReactions = await db.getMessageReactions(msg.id);
-    io.emit('reacao-mensagem', { msgTimestamp, reactions: updatedReactions });
+    console.log(`[REACAO] Reações atualizadas:`, updatedReactions);
+    
+    // Emite evento com ambos timestamp e ID para compatibilidade
+    io.emit('reacao-mensagem', { 
+      msgTimestamp: msg.timestamp, 
+      msgId: msg.id,
+      reactions: updatedReactions 
+    });
+    
     res.json({ ok: true, reactions: updatedReactions });
   } catch (error) {
-    console.error('Erro ao processar reação:', error);
+    console.error('[REACAO] Erro ao processar reação:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
@@ -455,60 +686,12 @@ app.get('/callback', (req, res) => {
 // Protege todas as rotas abaixo
 app.use(keycloak.protect());
 
-// Agora, arquivos estáticos e APIs exigem login
-app.use('/media', express.static(MEDIA_DIR));
-app.use(express.static(path.join(__dirname, 'public')));
-app.use('/groupPhotos.json', express.static(path.join(__dirname, 'groupPhotos.json')));
-app.use(express.json());
-
 // Rotas protegidas
 app.get('/protegido', (req, res) => {
   res.send('Você está autenticado pelo Keycloak!');
 });
 
-// Outras rotas protegidas (exemplo)
-app.get('/api/messages', async (req, res) => {
-  try {
-    const messages = await db.getAllMessages();
-    res.json(messages);
-  } catch (error) {
-    console.error('Erro ao buscar mensagens:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
-  }
-});
 
-app.post('/api/send', async (req, res) => {
-  const { to, message } = req.body;
-  console.log(`[ENVIO] Tentando enviar para: ${to} | body: "${message}"`);
-  try {
-    const sentMsg = await client.sendMessage(to, message);
-
-    // Salva manualmente a mensagem enviada
-    const obj = {
-      from: meuNumero || 'unknown',
-      to: to || 'unknown',
-      body: message || '',
-      timestamp: Date.now(),
-      mediaFilename: null,
-      mimetype: null,
-      fromMe: true,
-      senderName: meuNome || meuNumero || 'Unknown',
-      groupName: to.endsWith('@g.us') ? null : undefined,
-      photoUrl: null,
-      mediaError: null,
-      reactions: [],
-      id: sentMsg?.id?.id || `sent_${Date.now()}` // Corrigido: usa o id da mensagem enviada
-    };
-    
-    await db.saveMessage(obj);
-    io.emit('nova-mensagem', obj);
-
-    res.json({ ok: true });
-  } catch (e) {
-    console.log(`[ENVIO][ERRO] Falha ao enviar para: ${to} | body: "${message}" | erro: ${e.message}`);
-    res.json({ ok: false, error: e.message });
-  }
-});
 
 server.listen(3000, () => {
   console.log('Acesse http://localhost:3000');

@@ -2,7 +2,8 @@
 <html lang="pt-br">
 <head>
   <meta charset="UTF-8">
-  <title>Meu WhatsApp Web Clone</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privapp - Mensagens Privadas</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
   <script type="module" src="https://cdn.jsdelivr.net/npm/emoji-picker-element@^1/index.js"></script>
   <link rel="stylesheet" href="styles.css">
@@ -10,53 +11,99 @@
 <body>
   <button id="toggle-darkmode" class="toggle-darkmode" title="Alternar modo noturno/dia">🌙</button>
   <emoji-picker id="emojiPicker" style="position:fixed;z-index:3000;display:none;"></emoji-picker>
-  <div class="container-fluid">
-    <div class="row">
-      <!-- Lista de conversas -->
-      <div class="col-md-4 border-end" style="height: 90vh; overflow-y: auto;">
-        <div class="d-flex align-items-center justify-content-between">
-          <h4>Conversas</h4>
-          <div>
-            <button id="btnAddContato" class="btn btn-success btn-sm me-2">Adicionar Contato</button>
-            <button id="btnLimpar" class="btn btn-danger btn-sm">Limpar</button>
+  
+  <div class="app-container">
+    <!-- Header com Logo -->
+    <div class="app-header">
+      <div class="header-content">
+        <div class="logo-container">
+          <svg class="logo-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2C13.1 2 14 2.9 14 4V6H16C17.1 6 18 6.9 18 8V20C18 21.1 17.1 22 16 22H8C6.9 22 6 21.1 6 20V8C6 6.9 6.9 6 8 6H10V4C10 2.9 10.9 2 12 2ZM12 4C11.4 4 11 4.4 11 5V6H13V5C13 4.4 12.6 4 12 4ZM8 8V20H16V8H8Z" fill="currentColor"/>
+            <path d="M12 12C13.1 12 14 12.9 14 14C14 15.1 13.1 16 12 16C10.9 16 10 15.1 10 14C10 12.9 10.9 12 12 12Z" fill="currentColor"/>
+          </svg>
+          <span class="app-name">Privapp</span>
+        </div>
+        <div class="search-container">
+          <div class="search-box">
+            <svg class="search-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M15.5 14H14.71L14.43 13.73C15.41 12.59 16 11.11 16 9.5C16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16C11.11 16 12.59 15.41 13.73 14.43L14 14.71V15.5L19 20.49L20.49 19L15.5 14ZM9.5 14C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14Z" fill="currentColor"/>
+            </svg>
+            <input type="text" id="buscaContato" class="search-input" placeholder="Search" oninput="filtrarContatos()">
           </div>
         </div>
-        <input type="text" id="buscaContato" class="form-control mb-2" placeholder="Buscar contato..." oninput="filtrarContatos()">
-        <ul id="listaContatos" class="list-group"></ul>
       </div>
-      <!-- Área de chat -->
-      <div class="col-md-8 chat-bg d-flex flex-column" style="height: 90vh; padding: 0;">
-        <!-- Cabeçalho espesso -->
-        <div class="chat-header d-flex align-items-center px-4" style="min-height:70px;">
-          <h4 id="nomeContato" class="mb-0">Selecione uma conversa</h4>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <!-- Chat List Section -->
+      <div class="chat-list-section" id="chatListSection">
+        <div class="chat-list-header">
+          <div class="header-actions">
+            <button id="btnAddContato" class="btn-action">+</button>
+            <button id="btnLimpar" class="btn-action">🗑️</button>
+          </div>
         </div>
-        <!-- Área de mensagens -->
-        <div style="flex:1; overflow-y:auto;">
-          <input type="text" id="busca" class="form-control mb-2 mt-2" placeholder="Buscar mensagem nesta conversa...">
-          <div id="mensagens"></div>
+        <div class="chat-list" id="listaContatos"></div>
+      </div>
+
+      <!-- Chat Area Section -->
+      <div class="chat-area-section" id="chatAreaSection">
+        <div class="chat-header">
+          <h4 id="nomeContato" class="chat-title">Selecione uma conversa</h4>
         </div>
-        <!-- Rodapé espesso -->
-        <div class="chat-footer px-4 py-3">
-          <div id="filePreview" style="display:none; margin-bottom:8px;">
-            <div class="alert alert-secondary d-flex align-items-center justify-content-between py-2 px-3 mb-2" style="max-width:350px;">
-              <span id="filePreviewName" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:250px;"></span>
-              <button type="button" class="btn-close ms-2" aria-label="Remover" onclick="removerArquivo()"></button>
+        <div class="chat-messages">
+          <div class="search-messages">
+            <input type="text" id="busca" class="search-input" placeholder="Buscar mensagem nesta conversa...">
+          </div>
+          <div id="mensagens" class="messages-container">
+            <div class="scroll-indicator" id="scrollIndicator">
+              <span>Novas mensagens</span>
+              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width: 16px; height: 16px; margin-left: 8px;">
+                <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z" fill="currentColor"/>
+              </svg>
             </div>
           </div>
-          <form id="formEnvio" class="d-flex gap-2 mb-2 position-relative">
-            <button type="button" id="btnClip" class="btn btn-light" style="font-size:1.4em;line-height:1;padding:0 10px;position:relative;">
-              📎
-            </button>
-            <input type="text" id="texto" class="form-control" placeholder="Mensagem" style="flex:1;">
-            <button type="submit" class="btn btn-primary">Enviar</button>
-            <!-- Popover do anexo -->
-            <div id="popoverAnexo" class="card shadow-sm p-2" style="display:none;position:absolute;bottom:45px;left:0;z-index:10;min-width:220px;">
-              <label class="form-label mb-1" style="font-size:0.95em;">Anexar arquivo</label>
-              <input type="file" id="arquivoMidiaPopover" class="form-control form-control-sm">
+          <button id="scrollToBottom" class="scroll-to-bottom" style="display: none;">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z" fill="currentColor"/>
+            </svg>
+          </button>
+        </div>
+        <div class="chat-input">
+          <div id="filePreview" class="file-preview" style="display:none;">
+            <div class="file-item">
+              <span id="filePreviewName" class="file-name"></span>
+              <button type="button" class="file-remove" onclick="removerArquivo()">×</button>
+            </div>
+          </div>
+          <form id="formEnvio" class="input-form">
+            <button type="button" id="btnClip" class="btn-attach">📎</button>
+            <input type="text" id="texto" class="message-input" placeholder="Mensagem">
+            <button type="submit" class="btn-send">Enviar</button>
+            <div id="popoverAnexo" class="attachment-popover" style="display:none;">
+              <label class="popover-label">Anexar arquivo</label>
+              <input type="file" id="arquivoMidiaPopover" class="file-input">
             </div>
           </form>
         </div>
       </div>
+    </div>
+
+    <!-- Bottom Navigation -->
+    <div class="bottom-nav">
+      <button class="nav-item active" data-section="chatListSection">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M20 2H4C2.9 2 2 2.9 2 4V22L6 18H20C21.1 18 22 17.1 22 16V4C22 2.9 21.1 2 20 2ZM20 16H6L4 18V4H20V16Z" fill="currentColor"/>
+        </svg>
+        <span class="nav-label">Chats</span>
+      </button>
+      <button class="nav-item" data-section="contactsSection">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M16 4C16 5.1 15.1 6 14 6C12.9 6 12 5.1 12 4C12 2.9 12.9 2 14 2C15.1 2 16 2.9 16 4ZM14 8C15.1 8 16 8.9 16 10C16 11.1 15.1 12 14 12C12.9 12 12 11.1 12 10C12 8.9 12.9 8 14 8ZM8 4C8 5.1 7.1 6 6 6C4.9 6 4 5.1 4 4C4 2.9 4.9 2 6 2C7.1 2 8 2.9 8 4ZM6 8C7.1 8 8 8.9 8 10C8 11.1 7.1 12 6 12C4.9 12 4 11.1 4 10C4 8.9 4.9 8 6 8Z" fill="currentColor"/>
+        </svg>
+        <span class="nav-label">Contacts</span>
+      </button>
     </div>
   </div>
 
@@ -124,8 +171,7 @@
     </div>
   </div>
 
-  <!-- Adicione este modal logo antes do   <script src="script.js"></script>
-</body> -->
+  <!-- Modal para visualizar PDF -->
   <div class="modal fade" id="pdfModal" tabindex="-1" aria-labelledby="pdfModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-xl" style="max-width:90vw;">
       <div class="modal-content">
@@ -152,6 +198,39 @@
           <img id="imgViewer" src="" style="max-width:100%;max-height:70vh;border-radius:8px;box-shadow:0 2px 16px #0008;">
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Modal de Encaminhamento -->
+  <div class="forward-modal" id="forwardModal">
+    <div class="forward-modal-content">
+      <h3>Encaminhar mensagem</h3>
+      <div class="forward-contacts-list" id="forwardContactsList">
+        <!-- Lista de contatos será preenchida dinamicamente -->
+      </div>
+      <div class="forward-modal-actions">
+        <button class="forward-cancel-btn" onclick="fecharModalEncaminhar()">Cancelar</button>
+        <button class="forward-btn" id="forwardConfirmBtn" onclick="confirmarEncaminhamento()" disabled>Encaminhar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Barra de Seleção Múltipla -->
+  <div class="selection-toolbar" id="selectionToolbar">
+    <span class="selection-count" id="selectionCount">0 selecionadas</span>
+    <div class="selection-actions">
+      <button class="selection-btn" onclick="encaminharSelecionadas()">
+        <span class="icon">↗️</span>
+        Encaminhar
+      </button>
+      <button class="selection-btn" onclick="deletarSelecionadas()">
+        <span class="icon">🗑️</span>
+        Excluir
+      </button>
+      <button class="selection-btn" onclick="limparSelecao()">
+        <span class="icon">✖️</span>
+        Cancelar
+      </button>
     </div>
   </div>
 

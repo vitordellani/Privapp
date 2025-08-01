@@ -1099,8 +1099,39 @@ io.on('connection', socket => {
 
 
 
-server.listen(3000, () => {
-  console.log('Acesse http://localhost:3000');
+// Função para encontrar uma porta disponível
+function findAvailablePort(startPort) {
+  return new Promise((resolve, reject) => {
+    const net = require('net');
+    const server = net.createServer();
+    
+    server.listen(startPort, () => {
+      const port = server.address().port;
+      server.close(() => {
+        resolve(port);
+      });
+    });
+    
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        // Tenta a próxima porta
+        findAvailablePort(startPort + 1).then(resolve).catch(reject);
+      } else {
+        reject(err);
+      }
+    });
+  });
+}
+
+// Inicia o servidor na primeira porta disponível
+findAvailablePort(3000).then(port => {
+  server.listen(port, () => {
+    console.log(`Servidor iniciado na porta ${port}`);
+    console.log(`Acesse http://localhost:${port}`);
+  });
+}).catch(err => {
+  console.error('Erro ao iniciar servidor:', err);
+  process.exit(1);
 });
 
 client.initialize();

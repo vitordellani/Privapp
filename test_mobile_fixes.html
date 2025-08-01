@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teste - Correções Mobile</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .test-title {
+            color: #25d366;
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 15px;
+        }
+        .test-item {
+            padding: 10px;
+            margin: 10px 0;
+            border-left: 4px solid #25d366;
+            background: #f8f9fa;
+        }
+        .status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .status.fixed { background: #d4edda; color: #155724; }
+        .status.improved { background: #d1ecf1; color: #0c5460; }
+        .status.new { background: #fff3cd; color: #856404; }
+        .mobile-demo {
+            max-width: 375px;
+            margin: 20px auto;
+            border: 2px solid #ddd;
+            border-radius: 20px;
+            overflow: hidden;
+        }
+        .demo-header {
+            background: #25d366;
+            color: white;
+            padding: 10px;
+            text-align: center;
+            font-weight: bold;
+        }
+        .demo-content {
+            padding: 20px;
+            background: white;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔧 Teste das Correções do Sistema Mobile</h1>
+    <p>Esta página documenta as melhorias implementadas no sistema de visualização de mensagens.</p>
+
+    <div class="test-section">
+        <div class="test-title">🐛 Bugs Corrigidos</div>
+        
+        <div class="test-item">
+            <span class="status fixed">CORRIGIDO</span>
+            <strong>Notificações persistentes no mobile</strong><br>
+            <small>A aplicação agora detecta corretamente quando uma conversa está aberta no modo mobile</small>
+        </div>
+        
+        <div class="test-item">
+            <span class="status fixed">CORRIGIDO</span>
+            <strong>Badge não desaparece no mobile</strong><br>
+            <small>O badge de mensagens não lidas agora é removido automaticamente ao abrir a conversa</small>
+        </div>
+        
+        <div class="test-item">
+            <span class="status fixed">CORRIGIDO</span>
+            <strong>Sincronização de estado</strong><br>
+            <small>Melhor sincronização entre NotificationManager, MessageViewTracker e AppState</small>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <div class="test-title">✨ Melhorias Implementadas</div>
+        
+        <div class="test-item">
+            <span class="status improved">MELHORADO</span>
+            <strong>Detecção de chat aberto</strong><br>
+            <small>Verificação mais rigorosa incluindo foco da janela e visibilidade da página</small>
+        </div>
+        
+        <div class="test-item">
+            <span class="status improved">MELHORADO</span>
+            <strong>Logs de debug</strong><br>
+            <small>Sistema de logs detalhado para facilitar debugging futuro</small>
+        </div>
+        
+        <div class="test-item">
+            <span class="status improved">MELHORADO</span>
+            <strong>Callbacks de navegação</strong><br>
+            <small>Sistemas são notificados quando o chat é aberto/fechado no mobile</small>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <div class="test-title">🆕 Funcionalidades Novas</div>
+        
+        <div class="test-item">
+            <span class="status new">NOVO</span>
+            <strong>Feedback visual mobile</strong><br>
+            <small>Indicador visual quando mensagens são marcadas como lidas no mobile</small>
+        </div>
+        
+        <div class="test-item">
+            <span class="status new">NOVO</span>
+            <strong>Marcação forçada</strong><br>
+            <small>Opção de forçar marcação como lida em situações específicas</small>
+        </div>
+        
+        <div class="test-item">
+            <span class="status new">NOVO</span>
+            <strong>Verificação de visibilidade</strong><br>
+            <small>Sistema verifica se a página está visível e a janela tem foco</small>
+        </div>
+    </div>
+
+    <div class="mobile-demo">
+        <div class="demo-header">📱 Demonstração Mobile</div>
+        <div class="demo-content">
+            <p><strong>Como testar:</strong></p>
+            <ol>
+                <li>Abra a aplicação em um dispositivo mobile ou redimensione a janela</li>
+                <li>Receba uma mensagem (badge aparece)</li>
+                <li>Toque no contato para abrir a conversa</li>
+                <li>Observe que o badge desaparece imediatamente</li>
+                <li>Veja o indicador visual de "Mensagens visualizadas"</li>
+            </ol>
+            
+            <p><strong>Verificações automáticas:</strong></p>
+            <ul>
+                <li>✅ Chat está visível na tela</li>
+                <li>✅ É o chat atual selecionado</li>
+                <li>✅ Janela tem foco</li>
+                <li>✅ Página está visível</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <div class="test-title">🔍 Como Verificar</div>
+        
+        <div class="test-item">
+            <strong>1. Console do Navegador</strong><br>
+            <small>Abra o DevTools (F12) e veja os logs detalhados dos sistemas</small>
+        </div>
+        
+        <div class="test-item">
+            <strong>2. Teste Manual</strong><br>
+            <small>Simule recebimento de mensagens e abertura de conversas</small>
+        </div>
+        
+        <div class="test-item">
+            <strong>3. Diferentes Cenários</strong><br>
+            <small>Teste com janela em foco/desfocada, página visível/oculta</small>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <div class="test-title">📋 Checklist de Testes</div>
+        
+        <div class="test-item">
+            <input type="checkbox" id="test1"> <label for="test1">Badge desaparece ao abrir conversa no mobile</label>
+        </div>
+        
+        <div class="test-item">
+            <input type="checkbox" id="test2"> <label for="test2">Notificações param quando conversa está aberta</label>
+        </div>
+        
+        <div class="test-item">
+            <input type="checkbox" id="test3"> <label for="test3">Indicador visual aparece ao marcar como lida</label>
+        </div>
+        
+        <div class="test-item">
+            <input type="checkbox" id="test4"> <label for="test4">Logs aparecem corretamente no console</label>
+        </div>
+        
+        <div class="test-item">
+            <input type="checkbox" id="test5"> <label for="test5">Funciona com janela desfocada/focada</label>
+        </div>
+    </div>
+
+    <script>
+        // Simular alguns logs para demonstração
+        console.log('%c[MessageViewTracker] Sistema inicializado', 'color: #25d366; font-weight: bold');
+        console.log('%c[NotificationManager] Sistema inicializado', 'color: #25d366; font-weight: bold');
+        console.log('%c[AppState] Sistema inicializado', 'color: #25d366; font-weight: bold');
+        
+        // Adicionar evento para checkboxes
+        document.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+            checkbox.addEventListener('change', function() {
+                const completed = document.querySelectorAll('input[type="checkbox"]:checked').length;
+                const total = document.querySelectorAll('input[type="checkbox"]').length;
+                
+                if (completed === total) {
+                    alert('🎉 Todos os testes foram marcados como concluídos!');
+                }
+            });
+        });
+    </script>
+</body>
+</html>

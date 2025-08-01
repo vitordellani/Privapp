@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privapp - Mensagens Privadas</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+  <script type="module" src="https://cdn.jsdelivr.net/npm/emoji-picker-element@^1/index.js"></script>
+  <link rel="stylesheet" href="/css/styles.css">
+  
+  <!-- Novos scripts para melhorias do sistema de visualização -->
+  <script src="/js/AppState.js"></script>
+  <script src="/js/MessageViewTracker.js"></script>
+  <script src="/js/NotificationManager.js"></script>
+</head>
+<body>
+  <emoji-picker id="emojiPicker" style="position:fixed;z-index:3000;display:none;"></emoji-picker>
+  
+  <div class="app-container">
+    <!-- Header com Logo -->
+    <div class="app-header">
+      <div class="header-content">
+        <div class="logo-container">
+          <svg class="logo-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2C13.1 2 14 2.9 14 4V6H16C17.1 6 18 6.9 18 8V20C18 21.1 17.1 22 16 22H8C6.9 22 6 21.1 6 20V8C6 6.9 6.9 6 8 6H10V4C10 2.9 10.9 2 12 2ZM12 4C11.4 4 11 4.4 11 5V6H13V5C13 4.4 12.6 4 12 4ZM8 8V20H16V8H8Z" fill="currentColor"/>
+            <path d="M12 12C13.1 12 14 12.9 14 14C14 15.1 13.1 16 12 16C10.9 16 10 15.1 10 14C10 12.9 10.9 12 12 12Z" fill="currentColor"/>
+          </svg>
+          <span class="app-name">Privapp</span>
+        </div>
+        <div class="search-container">
+          <div class="search-box">
+            <svg class="search-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M15.5 14H14.71L14.43 13.73C15.41 12.59 16 11.11 16 9.5C16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16C11.11 16 12.59 15.41 13.73 14.43L14 14.71V15.5L19 20.49L20.49 19L15.5 14ZM9.5 14C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14Z" fill="currentColor"/>
+            </svg>
+            <input type="text" id="buscaContato" class="search-input" placeholder="Search" oninput="filtrarContatos()">
+          </div>
+          <div class="user-info">
+            <div class="profile-photo-container" id="profilePhotoContainer">
+              <div class="profile-photo" id="profilePhoto">
+                <div class="profile-initial" id="profileInitial">U</div>
+              </div>
+              <input type="file" id="profilePhotoInput" accept="image/*" style="display: none;">
+            </div>
+            <span id="currentUser" class="current-user">Usuário</span>
+          </div>
+          <button id="btnLogout" class="btn-logout" title="Sair" onclick="logout()">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="20" height="20">
+              <path d="M17 7L15.59 8.41L18.17 11H8V13H18.17L15.59 15.59L17 17L22 12L17 7ZM4 5H12V3H4C2.9 3 2 3.9 2 5V19C2 20.1 2.9 21 4 21H12V19H4V5Z" fill="currentColor"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <!-- Chat List Section -->
+      <div class="chat-list-section" id="chatListSection">
+        <div class="chat-list-header">
+          <div class="header-actions">
+            <button id="btnAddContato" class="btn-action">+</button>
+            <button id="btnLimpar" class="btn-action">🗑️</button>
+            <button id="toggle-darkmode" class="btn-action" title="Alternar modo noturno/dia">🌙</button>
+          </div>
+        </div>
+        <div class="chat-list" id="listaContatos"></div>
+      </div>
+
+      <!-- Chat Area Section -->
+      <div class="chat-area-section" id="chatAreaSection">
+        <div class="chat-header">
+          <button class="back-button" id="backButton" style="display: none;">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M20 11H7.83L13.42 5.41L12 4L4 12L12 20L13.41 18.59L7.83 13H20V11Z" fill="currentColor"/>
+            </svg>
+          </button>
+          <h4 id="nomeContato" class="chat-title">Selecione uma conversa</h4>
+        </div>
+        <div class="chat-messages">
+          <div class="search-messages minimized" id="searchMessages">
+            <div class="search-header">
+              <input type="text" id="busca" class="search-input" placeholder="Buscar mensagem nesta conversa...">
+              <button type="button" class="search-toggle" id="searchToggle" title="Expandir busca">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6 1.41 1.41z" fill="currentColor"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div id="mensagens" class="messages-container">
+            <div class="scroll-indicator" id="scrollIndicator">
+              <span>Novas mensagens</span>
+              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width: 16px; height: 16px; margin-left: 8px;">
+                <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z" fill="currentColor"/>
+              </svg>
+            </div>
+          </div>
+          <button id="scrollToBottom" class="scroll-to-bottom" style="display: none;">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z" fill="currentColor"/>
+            </svg>
+          </button>
+        </div>
+        <div class="chat-input">
+          <div id="filePreview" class="file-preview" style="display:none;">
+            <div class="file-item">
+              <span id="filePreviewName" class="file-name"></span>
+              <button type="button" class="file-remove" onclick="removerArquivo()">×</button>
+            </div>
+          </div>
+          <form id="formEnvio" class="input-form">
+            <button type="button" id="btnClip" class="btn-attach">📎</button>
+            <input type="text" id="texto" class="message-input" placeholder="Mensagem">
+            <button type="submit" class="btn-send">Enviar</button>
+            <div id="popoverAnexo" class="attachment-popover" style="display:none;">
+              <label class="popover-label">Anexar arquivo</label>
+              <input type="file" id="arquivoMidiaPopover" class="file-input">
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Navigation -->
+    <div class="bottom-nav">
+      <button class="nav-item active" data-section="chatListSection">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M20 2H4C2.9 2 2 2.9 2 4V22L6 18H20C21.1 18 22 17.1 22 16V4C22 2.9 21.1 2 20 2ZM20 16H6L4 18V4H20V16Z" fill="currentColor"/>
+        </svg>
+        <span class="nav-label">Chats</span>
+      </button>
+      <button class="nav-item" data-section="contactsSection">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M16 4C16 5.1 15.1 6 14 6C12.9 6 12 5.1 12 4C12 2.9 12.9 2 14 2C15.1 2 16 2.9 16 4ZM14 8C15.1 8 16 8.9 16 10C16 11.1 15.1 12 14 12C12.9 12 12 11.1 12 10C12 8.9 12.9 8 14 8ZM8 4C8 5.1 7.1 6 6 6C4.9 6 4 5.1 4 4C4 2.9 4.9 2 6 2C7.1 2 8 2.9 8 4ZM6 8C7.1 8 8 8.9 8 10C8 11.1 7.1 12 6 12C4.9 12 4 11.1 4 10C4 8.9 4.9 8 6 8Z" fill="currentColor"/>
+        </svg>
+        <span class="nav-label">Contacts</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Modal para adicionar/editar contato -->
+  <div class="modal fade" id="modalContato" tabindex="-1" aria-labelledby="modalContatoLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <form class="modal-content" id="formModalContato">
+        <div class="modal-header">
+          <h5 class="modal-title" id="modalContatoLabel">Adicionar/Editar Contato ou Grupo</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label for="numeroContato" class="form-label">Número ou ID do Grupo</label>
+            <input type="text" class="form-control" id="numeroContato" required>
+          </div>
+          <div class="mb-3">
+            <label for="nomeContatoModal" class="form-label">Nome</label>
+            <input type="text" class="form-control" id="nomeContatoModal" required>
+          </div>
+          <!-- Personalização de notificação -->
+          <hr>
+          <div class="mb-3">
+            <label class="form-label">Som de notificação personalizado</label>
+            <div class="input-group">
+              <button type="button" class="btn btn-outline-primary" id="btnEscolherSom">Escolher arquivo</button>
+              <span id="nomeSomSelecionado" class="badge bg-info text-dark ms-2" style="display:none;align-self:center;"></span>
+              <button type="button" class="btn btn-outline-secondary" id="btnTocarSom">🔊</button>
+              <button type="button" class="btn btn-outline-danger" id="btnRemoverSom">Remover</button>
+            </div>
+            <input type="file" id="inputSomNotificacao" accept="audio/*" style="display:none;">
+          </div>
+          <div class="form-check mt-3">
+            <input class="form-check-input" type="checkbox" id="toggleNotificacaoContinua">
+            <label class="form-check-label" for="toggleNotificacaoContinua">
+              Notificações contínuas
+            </label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-success">Salvar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal de confirmação estilizado -->
+  <div class="modal fade" id="modalConfirm" tabindex="-1" aria-labelledby="modalConfirmLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <form class="modal-content" id="formModalConfirm">
+        <div class="modal-header">
+          <h5 class="modal-title" id="modalConfirmLabel">Confirmação</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+        </div>
+        <div class="modal-body">
+          <p id="modalConfirmMsg"></p>
+          <input type="text" class="form-control" id="modalConfirmInput" placeholder='Digite "delete" para confirmar'>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-danger">Confirmar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal para visualizar PDF -->
+  <div class="modal fade" id="pdfModal" tabindex="-1" aria-labelledby="pdfModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl" style="max-width:90vw;">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="pdfModalLabel">Visualizar PDF</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+        </div>
+        <div class="modal-body" style="height:80vh;">
+          <iframe id="pdfViewer" src="" style="width:100%;height:100%;border:none;"></iframe>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal para visualizar imagem -->
+  <div class="modal fade" id="imgModal" tabindex="-1" aria-labelledby="imgModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" style="max-width:90vw;">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="imgModalLabel">Visualizar Imagem</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+        </div>
+        <div class="modal-body text-center" style="background:#222;">
+          <img id="imgViewer" src="" style="max-width:100%;max-height:70vh;border-radius:8px;box-shadow:0 2px 16px #0008;">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de Encaminhamento -->
+  <div class="forward-modal" id="forwardModal">
+    <div class="forward-modal-content">
+      <h3>Encaminhar mensagem</h3>
+      <div class="forward-contacts-list" id="forwardContactsList">
+        <!-- Lista de contatos será preenchida dinamicamente -->
+      </div>
+      <div class="forward-modal-actions">
+        <button class="forward-cancel-btn" onclick="fecharModalEncaminhar()">Cancelar</button>
+        <button class="forward-btn" id="forwardConfirmBtn" onclick="confirmarEncaminhamento()" disabled>Encaminhar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Barra de Seleção Múltipla -->
+  <div class="selection-toolbar" id="selectionToolbar">
+    <span class="selection-count" id="selectionCount">0 selecionadas</span>
+    <div class="selection-actions">
+      <button class="selection-btn" onclick="encaminharSelecionadas()">
+        <span class="icon">↗️</span>
+        Encaminhar
+      </button>
+      <button class="selection-btn" onclick="deletarSelecionadas()">
+        <span class="icon">🗑️</span>
+        Excluir
+      </button>
+      <button class="selection-btn" onclick="limparSelecao()">
+        <span class="icon">✖️</span>
+        Cancelar
+      </button>
+    </div>
+  </div>
+
+  <!-- Indicador de Transição Mobile -->
+  <div class="mobile-transition-indicator" id="mobileTransitionIndicator">
+    Carregando conversa...
+  </div>
+
+  <script type="module" src="https://cdn.jsdelivr.net/npm/emoji-picker-element@^1/index.js"></script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+      <script src="/js/script.js"></script>
+    <!-- Script de teste para navegação mobile -->
+    <script src="/TestScripts/test-mobile-navigation.js"></script>
+    <!-- Script de teste para detecção do teclado virtual -->
+    <script src="/TestScripts/test-keyboard-detection.js"></script>
+    <!-- Script de teste para busca minimizável -->
+    <script src="/TestScripts/test-search-toggle.js"></script>
+    <!-- Script de teste para barra de navegação -->
+    <script src="/TestScripts/test-bottom-nav-hide.js"></script>
+    <!-- Script de teste JavaScript da barra de navegação -->
+    <script src="/TestScripts/test-bottom-nav-js.js"></script>
+    <!-- Script de teste de visibilidade da caixa de texto com teclado -->
+    <script src="/TestScripts/test-keyboard-input-visibility.js"></script>
+    <!-- Script de ajuste de posicionamento da caixa de texto -->
+    <script src="/TestScripts/test-input-position-adjustment.js"></script>
+</body>
+</html>

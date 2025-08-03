@@ -89,6 +89,9 @@ app.post('/login', async (req, res) => {
       is_admin: user.is_admin
     };
 
+    // Marcar usuário como online
+    await db.setUserOnline(user.id);
+
     if (needsPasswordReset) {
       res.json({ redirect: '/change-password' });
     } else if (user.is_admin) {
@@ -102,7 +105,16 @@ app.post('/login', async (req, res) => {
   }
 });
 
-app.get('/logout', (req, res) => {
+app.get('/logout', async (req, res) => {
+  try {
+    // Marcar usuário como offline antes de destruir a sessão
+    if (req.session && req.session.user) {
+      await db.setUserOffline(req.session.user.id);
+    }
+  } catch (error) {
+    console.error('Erro ao marcar usuário como offline:', error);
+  }
+  
   req.session.destroy((err) => {
     if (err) {
       console.error('Erro ao destruir sessão:', err);
@@ -134,13 +146,13 @@ app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
 
 app.post('/api/users', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { username, password, email, isAdmin } = req.body;
+    const { username, password, email, whatsappNumber, isAdmin } = req.body;
     
     if (!username || !password) {
       return res.status(400).json({ error: 'Usuário e senha são obrigatórios' });
     }
 
-    const userId = await db.createUser({ username, password, email, isAdmin });
+    const userId = await db.createUser({ username, password, email, whatsappNumber, isAdmin });
     res.json({ id: userId, message: 'Usuário criado com sucesso' });
   } catch (error) {
     console.error('Erro ao criar usuário:', error);
@@ -271,6 +283,52 @@ app.get('/api/check-password-reset', requireAuth, async (req, res) => {
   }
 });
 
+// Rotas para gerenciar números de WhatsApp
+app.put('/api/users/:id/whatsapp', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { whatsappNumber } = req.body;
+    
+    if (!whatsappNumber) {
+      return res.status(400).json({ error: 'Número do WhatsApp é obrigatório' });
+    }
+    
+    // Validar formato do número (básico)
+    const cleanNumber = whatsappNumber.replace(/\D/g, '');
+    if (cleanNumber.length < 10 || cleanNumber.length > 15) {
+      return res.status(400).json({ error: 'Formato de número inválido' });
+    }
+    
+    await db.updateUserWhatsApp(id, cleanNumber);
+    res.json({ message: 'Número do WhatsApp atualizado com sucesso' });
+  } catch (error) {
+    console.error('Erro ao atualizar WhatsApp:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+// Rota para obter usuários online
+app.get('/api/users/online', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const onlineUsers = await db.getOnlineUsers();
+    res.json(onlineUsers);
+  } catch (error) {
+    console.error('Erro ao buscar usuários online:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+// Rota para atualizar atividade do usuário (heartbeat)
+app.post('/api/user/heartbeat', requireAuth, async (req, res) => {
+  try {
+    await db.setUserOnline(req.session.user.id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Erro no heartbeat:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
 // Proteger a rota principal
 app.get('/', requireAuth, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -360,6 +418,70 @@ async function atualizarFotosGrupos() {
 
   fs.writeFileSync(GROUP_PHOTOS_FILE, JSON.stringify(groupPhotos, null, 2));
   console.log('Fotos dos grupos salvas em groupPhotos.json!');
+}
+
+// Função para enviar notificações WhatsApp
+async function sendWhatsAppNotifications(msg) {
+  try {
+    // Obter usuários online com números de WhatsApp cadastrados
+    const onlineUsers = await db.getOnlineUsers();
+    const usersWithWhatsApp = onlineUsers.filter(user => user.whatsapp_number);
+    
+    if (usersWithWhatsApp.length === 0) {
+      console.log('[NOTIFICAÇÃO] Nenhum usuário online com WhatsApp cadastrado');
+      return;
+    }
+    
+    // Determinar nome do remetente
+    let senderName = 'Contato desconhecido';
+    const isGroup = msg.from && msg.from.endsWith('@g.us');
+    
+    if (isGroup) {
+      try {
+        const chat = await msg.getChat();
+        const groupName = chat && chat.name ? chat.name : 'Grupo';
+        const memberName = msg.sender?.pushname || msg.sender?.name || 'Membro';
+        senderName = `${memberName} (${groupName})`;
+      } catch (err) {
+        senderName = 'Grupo';
+      }
+    } else {
+      senderName = msg._data?.notifyName || msg.sender?.pushname || msg.sender?.name || 'Contato';
+    }
+    
+    console.log(`[NOTIFICAÇÃO] Enviando notificações para ${usersWithWhatsApp.length} usuários online`);
+    
+    // Enviar notificação para cada usuário online
+    for (const user of usersWithWhatsApp) {
+      try {
+        // Salvar notificação no banco
+        const notificationId = await db.saveWhatsAppNotification(user.id, msg.id.id, senderName);
+        
+        // Formatar número para WhatsApp (adicionar @c.us se necessário)
+        let whatsappId = user.whatsapp_number;
+        if (!whatsappId.includes('@')) {
+          whatsappId = `${user.whatsapp_number}@c.us`;
+        }
+        
+        // Mensagem de notificação
+        const notificationMessage = `🔔 *Privapp - Nova Mensagem*\n\nVocê tem uma nova mensagem de: *${senderName}*\n\nAcesse o Privapp para visualizar: ${process.env.APP_URL || 'http://localhost:3000'}`;
+        
+        // Enviar notificação via WhatsApp
+        await client.sendMessage(whatsappId, notificationMessage);
+        
+        // Marcar notificação como enviada
+        await db.markNotificationSent(notificationId);
+        
+        console.log(`[NOTIFICAÇÃO] Enviada para ${user.username} (${user.whatsapp_number})`);
+        
+      } catch (error) {
+        console.error(`[NOTIFICAÇÃO] Erro ao enviar para ${user.username}:`, error.message);
+      }
+    }
+    
+  } catch (error) {
+    console.error('[NOTIFICAÇÃO] Erro geral ao enviar notificações:', error);
+  }
 }
 
 // Função para salvar mensagens recebidas
@@ -491,7 +613,11 @@ client.on('message', async (msg) => {
         mediaError = 'Não foi possível baixar a mídia automaticamente.';
       }
     }
+    
     await saveMessage(msg, mediaFilename, mimetype, mediaError);
+    
+    // Enviar notificações WhatsApp para usuários online
+    await sendWhatsAppNotifications(msg);
   }
 });
 

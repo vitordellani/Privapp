@@ -67,7 +67,23 @@ class Database {
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           last_login DATETIME,
           profile_photo TEXT,
-          password_reset_required BOOLEAN DEFAULT 0
+          password_reset_required BOOLEAN DEFAULT 0,
+          whatsapp_number TEXT,
+          is_online BOOLEAN DEFAULT 0,
+          last_activity DATETIME
+        )
+      `;
+
+      const createNotificationsTable = `
+        CREATE TABLE IF NOT EXISTS whatsapp_notifications (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          message_id TEXT NOT NULL,
+          sender_name TEXT NOT NULL,
+          notification_sent BOOLEAN DEFAULT 0,
+          sent_at DATETIME,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
         )
       `;
 
@@ -95,7 +111,16 @@ class Database {
                 return;
               }
               console.log('Tabela users criada/verificada');
-              this.createDefaultAdmin().then(resolve).catch(reject);
+              
+              this.db.run(createNotificationsTable, (err) => {
+                if (err) {
+                  console.error('Erro ao criar tabela whatsapp_notifications:', err);
+                  reject(err);
+                  return;
+                }
+                console.log('Tabela whatsapp_notifications criada/verificada');
+                this.createDefaultAdmin().then(resolve).catch(reject);
+              });
             });
           });
         });
@@ -193,7 +218,7 @@ class Database {
   createUser(userData) {
     return new Promise((resolve, reject) => {
       const bcrypt = require('bcrypt');
-      const { username, password, email, isAdmin } = userData;
+      const { username, password, email, whatsappNumber, isAdmin } = userData;
       
       bcrypt.hash(password, 10, (err, hash) => {
         if (err) {
@@ -202,11 +227,11 @@ class Database {
         }
 
         const sql = `
-          INSERT INTO users (username, password, email, is_admin, is_active)
-          VALUES (?, ?, ?, ?, ?)
+          INSERT INTO users (username, password, email, whatsapp_number, is_admin, is_active)
+          VALUES (?, ?, ?, ?, ?, ?)
         `;
         
-        this.db.run(sql, [username, hash, email, isAdmin ? 1 : 0, 1], function(err) {
+        this.db.run(sql, [username, hash, email, whatsappNumber || null, isAdmin ? 1 : 0, 1], function(err) {
           if (err) {
             reject(err);
             return;
@@ -595,6 +620,117 @@ class Database {
           return;
         }
         resolve(this.changes);
+      });
+    });
+  }
+
+  // Métodos para gerenciar usuários online
+  setUserOnline(userId) {
+    return new Promise((resolve, reject) => {
+      const sql = 'UPDATE users SET is_online = 1, last_activity = CURRENT_TIMESTAMP WHERE id = ?';
+      this.db.run(sql, [userId], function(err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(this.changes);
+        }
+      });
+    });
+  }
+
+  setUserOffline(userId) {
+    return new Promise((resolve, reject) => {
+      const sql = 'UPDATE users SET is_online = 0 WHERE id = ?';
+      this.db.run(sql, [userId], function(err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(this.changes);
+        }
+      });
+    });
+  }
+
+  getOnlineUsers() {
+    return new Promise((resolve, reject) => {
+      const sql = 'SELECT id, username, email, whatsapp_number, last_activity FROM users WHERE is_online = 1 AND is_active = 1';
+      this.db.all(sql, [], (err, rows) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows);
+        }
+      });
+    });
+  }
+
+  updateUserWhatsApp(userId, whatsappNumber) {
+    return new Promise((resolve, reject) => {
+      const sql = 'UPDATE users SET whatsapp_number = ? WHERE id = ?';
+      this.db.run(sql, [whatsappNumber, userId], function(err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(this.changes);
+        }
+      });
+    });
+  }
+
+  getUsersWithWhatsApp() {
+    return new Promise((resolve, reject) => {
+      const sql = 'SELECT id, username, email, whatsapp_number, is_online FROM users WHERE whatsapp_number IS NOT NULL AND whatsapp_number != "" AND is_active = 1';
+      this.db.all(sql, [], (err, rows) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows);
+        }
+      });
+    });
+  }
+
+  // Métodos para notificações WhatsApp
+  saveWhatsAppNotification(userId, messageId, senderName) {
+    return new Promise((resolve, reject) => {
+      const sql = 'INSERT INTO whatsapp_notifications (user_id, message_id, sender_name) VALUES (?, ?, ?)';
+      this.db.run(sql, [userId, messageId, senderName], function(err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(this.lastID);
+        }
+      });
+    });
+  }
+
+  markNotificationSent(notificationId) {
+    return new Promise((resolve, reject) => {
+      const sql = 'UPDATE whatsapp_notifications SET notification_sent = 1, sent_at = CURRENT_TIMESTAMP WHERE id = ?';
+      this.db.run(sql, [notificationId], function(err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(this.changes);
+        }
+      });
+    });
+  }
+
+  getPendingNotifications() {
+    return new Promise((resolve, reject) => {
+      const sql = `
+        SELECT n.id, n.user_id, n.message_id, n.sender_name, u.whatsapp_number, u.username
+        FROM whatsapp_notifications n
+        JOIN users u ON n.user_id = u.id
+        WHERE n.notification_sent = 0 AND u.is_online = 1 AND u.whatsapp_number IS NOT NULL
+      `;
+      this.db.all(sql, [], (err, rows) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows);
+        }
       });
     });
   }

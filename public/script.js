@@ -363,7 +363,9 @@ function contarMensagensNaoLidas(contato) {
   return todasMensagens.filter(m => 
     (m.from === contato || m.to === contato) && 
     !m.fromMe && 
-    !m.lida
+    !m.lida &&
+    // Filtrar mensagens de notificação do sistema
+    !(m.body && m.body.includes('Privapp - Nova Mensagem'))
   ).length;
 }
 
@@ -524,6 +526,9 @@ function formatRelativeTime(timestamp) {
 function renderContatos() {
   const contatos = {};
   todasMensagens.forEach(m => {
+    // Filtrar mensagens de notificação do sistema
+    if (m.body && m.body.includes('Privapp - Nova Mensagem')) return;
+    
     const contato = m.fromMe ? m.to : m.from;
     if (!contatos[contato]) contatos[contato] = [];
     contatos[contato].push(m);
@@ -1059,6 +1064,10 @@ function renderMensagens(filtro = '') {
   let msgs = todasMensagens.filter(m => {
     // NÃO renderiza mensagens locais de mídia (from==null && id==null && mediaFilename)
     if (m.mediaFilename && !m.from && !m.id) return false;
+    
+    // NÃO renderiza mensagens de notificação do sistema (Privapp - Nova Mensagem)
+    if (m.body && m.body.includes('Privapp - Nova Mensagem')) return false;
+    
     return (m.from === contatoSelecionado || m.to === contatoSelecionado);
   });
   if (filtro) {

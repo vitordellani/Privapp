@@ -179,7 +179,9 @@ class AppState {
     for (const [messageId, message] of this.messages) {
       if ((message.from === chatId || message.to === chatId) && 
           !message.fromMe && 
-          !this.readStatus.has(messageId)) {
+          !this.readStatus.has(messageId) &&
+          // Filtrar mensagens de notificação do sistema
+          !(message.body && message.body.includes('Privapp - Nova Mensagem'))) {
         count++;
       }
     }
@@ -341,4 +343,4 @@ class AppState {
 }
 
 // Exportar para uso global
-window.AppState = AppState; 
+window.AppState = AppState;

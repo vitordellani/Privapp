@@ -12,28 +12,40 @@ class ColumnMigration {
     console.log('Iniciando migração de colunas...');
     
     try {
-      // Verificar se as colunas existem
-      const tableInfo = await this.getTableInfo('users');
-      const columnNames = tableInfo.map(col => col.name);
+      // Verificar se as colunas existem na tabela users
+      const usersTableInfo = await this.getTableInfo('users');
+      const usersColumnNames = usersTableInfo.map(col => col.name);
       
-      console.log('Colunas existentes:', columnNames);
+      console.log('Colunas existentes na tabela users:', usersColumnNames);
       
       // Adicionar coluna whatsapp_number se não existir
-      if (!columnNames.includes('whatsapp_number')) {
+      if (!usersColumnNames.includes('whatsapp_number')) {
         await this.addColumn('users', 'whatsapp_number', 'TEXT');
         console.log('Coluna whatsapp_number adicionada');
       }
       
       // Adicionar coluna is_online se não existir
-      if (!columnNames.includes('is_online')) {
+      if (!usersColumnNames.includes('is_online')) {
         await this.addColumn('users', 'is_online', 'BOOLEAN DEFAULT 0');
         console.log('Coluna is_online adicionada');
       }
       
       // Adicionar coluna last_activity se não existir
-      if (!columnNames.includes('last_activity')) {
+      if (!usersColumnNames.includes('last_activity')) {
         await this.addColumn('users', 'last_activity', 'DATETIME');
         console.log('Coluna last_activity adicionada');
+      }
+      
+      // Verificar se as colunas existem na tabela messages
+      const messagesTableInfo = await this.getTableInfo('messages');
+      const messagesColumnNames = messagesTableInfo.map(col => col.name);
+      
+      console.log('Colunas existentes na tabela messages:', messagesColumnNames);
+      
+      // Adicionar coluna user_profile_photo se não existir
+      if (!messagesColumnNames.includes('user_profile_photo')) {
+        await this.addColumn('messages', 'user_profile_photo', 'TEXT');
+        console.log('Coluna user_profile_photo adicionada à tabela messages');
       }
       
       console.log('Migração concluída com sucesso!');

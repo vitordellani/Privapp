@@ -568,6 +568,16 @@ client.on('message_create', async (msg) => {
     return; // Ignora mensagens já processadas
   }
   
+  // Filtrar mensagens de status@broadcast (stories)
+  if (msg.from === 'status@broadcast' || msg.to === 'status@broadcast') {
+    console.log('[FILTRO] Mensagem de status@broadcast ignorada:', {
+      from: msg.from,
+      to: msg.to,
+      body: msg.body?.substring(0, 50) + '...'
+    });
+    return; // Ignora mensagens de stories
+  }
+  
   // Só salva se for enviada por você (fromMe true) E não foi enviada via API
   if (msg.fromMe && !mensagensEnviadasViaAPI.has(msg.id?.id)) {
     let mediaFilename = null;
@@ -594,6 +604,16 @@ client.on('message_create', async (msg) => {
 
 // Salva mensagens recebidas (de outros contatos)
 client.on('message', async (msg) => {
+  // Filtrar mensagens de status@broadcast (stories)
+  if (msg.from === 'status@broadcast' || msg.to === 'status@broadcast') {
+    console.log('[FILTRO] Mensagem de status@broadcast ignorada:', {
+      from: msg.from,
+      to: msg.to,
+      body: msg.body?.substring(0, 50) + '...'
+    });
+    return; // Ignora mensagens de stories
+  }
+  
   if (!msg.fromMe) {
     let mediaFilename = null;
     let mimetype = null;

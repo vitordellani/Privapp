@@ -400,6 +400,7 @@ class Database {
           m.media_error as mediaError, m.user_name as userName,
           m.user_profile_photo as userProfilePhoto
         FROM messages m
+        WHERE m.from_number != 'status@broadcast' AND m.to_number != 'status@broadcast'
         ORDER BY m.timestamp ASC
       `;
 

@@ -1091,21 +1091,23 @@ function renderMensagens(filtro = '') {
       } else if (msg.mimetype.startsWith('audio/')) {
         midiaHtml = `<br><audio controls><source src="${mediaUrl}" type="${msg.mimetype}"></audio>`;
       } else if (msg.mimetype === 'application/pdf') {
+        // Detectar Safari/iOS para evitar downloads automáticos
+        const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent) || /iPad|iPhone|iPod/.test(navigator.userAgent);
+        
         midiaHtml = `
           <div style="display:flex;align-items:center;gap:10px;">
             <span style="font-size:2em;color:#d32f2f;">📄</span>
             <div>
               <div><b>${msg.mediaFilename}</b></div>
               <button type="button" class="btn btn-sm btn-outline-primary mt-1" onclick="abrirPdfModal('${mediaUrl}')">Visualizar PDF</button>
-              <a href="${mediaUrl}" download class="btn btn-sm btn-outline-secondary mt-1">Baixar</a>
+              <button type="button" class="btn btn-sm btn-outline-secondary mt-1" onclick="window.open('${mediaUrl}', '_blank')">Baixar</button>
             </div>
           </div>
-          <div class="mt-2" style="max-width:180px;max-height:220px;">
-            <embed src="${mediaUrl}#toolbar=0&navpanes=0&scrollbar=0" type="application/pdf" width="100%" height="180px"/>
-          </div>
+          <div class="mt-2 text-muted"><small>Use "Visualizar PDF" para ver o arquivo</small></div>
         `;
       } else {
-        midiaHtml = `<br><a href="${mediaUrl}" download>Baixar arquivo</a>`;
+        // Para arquivos não reconhecidos, evitar downloads automáticos em todos os navegadores
+        midiaHtml = `<br><button type="button" class="btn btn-sm btn-outline-secondary" onclick="window.open('${mediaUrl}', '_blank')">Abrir arquivo</button>`;
       }
     }
     const enviada = msg.fromMe || (meuNumero && msg.from === meuNumero);
@@ -1741,9 +1743,18 @@ safeGet('formModalConfirm').onsubmit = function(e) {
 
 // PDF e imagem modal
 window.abrirPdfModal = function(url) {
-  safeGet('pdfViewer').src = url;
-  const modal = new bootstrap.Modal(safeGet('pdfModal'));
-  modal.show();
+  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent) || /iPad|iPhone|iPod/.test(navigator.userAgent);
+  
+  if (isSafari) {
+    // No Safari, abrir em nova aba para evitar downloads automáticos
+    window.open(url, '_blank');
+  } else {
+    // Em outros navegadores, usar o modal normalmente
+    const pdfUrl = url + '#view=FitH&toolbar=0&navpanes=0&scrollbar=0&statusbar=0&messages=0';
+    safeGet('pdfViewer').src = pdfUrl;
+    const modal = new bootstrap.Modal(safeGet('pdfModal'));
+    modal.show();
+  }
 };
 safeGet('pdfModal').addEventListener('hidden.bs.modal', function () {
   safeGet('pdfViewer').src = '';
@@ -2795,5 +2806,52 @@ async function atualizarAvatarMensagem(avatarElement) {
     
   } catch (error) {
     console.error('Erro ao atualizar avatar da mensagem:', error);
+  }
+}
+
+// Função para abrir PDF no modal
+function abrirPdfModal(pdfUrl) {
+  const modal = document.getElementById('pdfModal');
+  const iframe = document.getElementById('pdfViewer');
+  
+  if (!modal || !iframe) {
+    console.error('Modal ou iframe do PDF não encontrado');
+    return;
+  }
+  
+  // Limpar src anterior
+  iframe.src = '';
+  
+  // Detectar Safari/iOS para evitar downloads automáticos
+  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent) || 
+                   /iPad|iPhone|iPod/.test(navigator.userAgent);
+  
+  if (isSafari) {
+    // Para Safari, usar visualizador alternativo ou download direto
+    iframe.src = `data:text/html,<html><body style='margin:0;padding:20px;font-family:Arial,sans-serif;text-align:center;'><h3>Visualização de PDF</h3><p>Para visualizar este PDF no Safari, clique no botão abaixo:</p><br><a href='${pdfUrl}' target='_blank' style='display:inline-block;padding:10px 20px;background:#007bff;color:white;text-decoration:none;border-radius:5px;'>Abrir PDF</a></body></html>`;
+  } else {
+    // Para outros navegadores, usar iframe normal
+    iframe.src = pdfUrl;
+  }
+  
+  // Mostrar modal
+  const bootstrapModal = new bootstrap.Modal(modal);
+  bootstrapModal.show();
+}
+
+// Função para fechar modal PDF
+function fecharPdfModal() {
+  const modal = document.getElementById('pdfModal');
+  const iframe = document.getElementById('pdfViewer');
+  
+  if (iframe) {
+    iframe.src = '';
+  }
+  
+  if (modal) {
+    const bootstrapModal = bootstrap.Modal.getInstance(modal);
+    if (bootstrapModal) {
+      bootstrapModal.hide();
+    }
   }
 }

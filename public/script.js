@@ -2855,3 +2855,41 @@ function fecharPdfModal() {
     }
   }
 }
+
+// Função para abrir imagem no modal
+function abrirImgModal(imgUrl) {
+  const modal = document.getElementById('imgModal');
+  const img = document.getElementById('imgViewer');
+  
+  if (!modal || !img) {
+    console.error('Modal ou elemento de imagem não encontrado');
+    return;
+  }
+  
+  // Limpar src anterior
+  img.src = '';
+  
+  // Definir nova imagem
+  img.src = imgUrl;
+  
+  // Mostrar modal
+  const bootstrapModal = new bootstrap.Modal(modal);
+  bootstrapModal.show();
+}
+
+// Função para fechar modal de imagem
+function fecharImgModal() {
+  const modal = document.getElementById('imgModal');
+  const img = document.getElementById('imgViewer');
+  
+  if (img) {
+    img.src = '';
+  }
+  
+  if (modal) {
+    const bootstrapModal = bootstrap.Modal.getInstance(modal);
+    if (bootstrapModal) {
+      bootstrapModal.hide();
+    }
+  }
+}

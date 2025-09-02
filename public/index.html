@@ -6,12 +6,10 @@
   <title>Privapp - Mensagens Privadas</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
   <script type="module" src="https://cdn.jsdelivr.net/npm/emoji-picker-element@^1/index.js"></script>
-  <link rel="stylesheet" href="/css/styles.css">
+  <link rel="stylesheet" href="styles.css">
   
-  <!-- Novos scripts para melhorias do sistema de visualização -->
-  <script src="/js/AppState.js"></script>
-  <script src="/js/MessageViewTracker.js"></script>
-  <script src="/js/NotificationManager.js"></script>
+  <!-- QR Code Generator -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
 </head>
 <body>
   <emoji-picker id="emojiPicker" style="position:fixed;z-index:3000;display:none;"></emoji-picker>
@@ -26,6 +24,10 @@
             <path d="M12 12C13.1 12 14 12.9 14 14C14 15.1 13.1 16 12 16C10.9 16 10 15.1 10 14C10 12.9 10.9 12 12 12Z" fill="currentColor"/>
           </svg>
           <span class="app-name">Privapp</span>
+          <div id="whatsapp-status-indicator" class="whatsapp-status-indicator" title="Status do WhatsApp">
+            <div class="status-dot disconnected"></div>
+            <span class="status-text">Desconectado</span>
+          </div>
         </div>
         <div class="search-container">
           <div class="search-box">
@@ -273,7 +275,12 @@
   <script type="module" src="https://cdn.jsdelivr.net/npm/emoji-picker-element@^1/index.js"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-      <script src="/js/script.js"></script>
+  <!-- Carregar classes primeiro -->
+  <script src="/js/AppState.js"></script>
+  <script src="/js/MessageViewTracker.js"></script>
+  <script src="/js/NotificationManager.js"></script>
+  <!-- Carregar script principal depois -->
+  <script src="/js/script.js"></script>
     <!-- Script de teste para navegação mobile -->
     <script src="/TestScripts/test-mobile-navigation.js"></script>
     <!-- Script de teste para detecção do teclado virtual -->

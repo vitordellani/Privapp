@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teste de Status do WhatsApp via Socket.IO</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 {
+            color: #128C7E; /* Cor do WhatsApp */
+        }
+        .status-container {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .status-dot {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-connected { background-color: #25D366; }
+        .status-disconnected { background-color: #FF0000; }
+        .status-loading { background-color: #FFA500; }
+        .status-qr { background-color: #34B7F1; }
+        .status-error { background-color: #FF0000; }
+        .status-initializing { background-color: #FFA500; }
+        
+        .control-panel {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+        
+        button {
+            padding: 8px 12px;
+            margin: 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        
+        .btn-connected { background-color: #25D366; color: white; }
+        .btn-disconnected { background-color: #FF0000; color: white; }
+        .btn-loading { background-color: #FFA500; color: white; }
+        .btn-qr { background-color: #34B7F1; color: white; }
+        .btn-error { background-color: #FF0000; color: white; }
+        .btn-initializing { background-color: #FFA500; color: white; }
+        
+        .qr-container {
+            margin-top: 20px;
+            text-align: center;
+            display: none;
+        }
+        
+        .log-container {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f5f5f5;
+            height: 200px;
+            overflow-y: auto;
+        }
+        
+        .log-entry {
+            margin-bottom: 5px;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <h1>Teste de Status do WhatsApp via Socket.IO</h1>
+    
+    <div class="status-container">
+        <h2>Status Atual</h2>
+        <p>
+            <span id="statusDot" class="status-dot status-disconnected"></span>
+            <span id="statusText">Desconectado</span>
+        </p>
+        <p>Último erro: <span id="lastError">Nenhum</span></p>
+        <p>Conectado em: <span id="connectedAt">Não conectado</span></p>
+    </div>
+    
+    <div class="qr-container" id="qrContainer">
+        <h2>QR Code</h2>
+        <p>Escaneie o QR code abaixo com o WhatsApp:</p>
+        <div id="qrCode">
+            <p>QR code simulado</p>
+        </div>
+    </div>
+    
+    <div class="control-panel">
+        <h2>Controle de Status</h2>
+        <p>Clique nos botões abaixo para simular mudanças de status:</p>
+        
+        <button class="btn-initializing" onclick="changeStatus('initializing')">Inicializando</button>
+        <button class="btn-qr" onclick="changeStatus('qr_received')">QR Code</button>
+        <button class="btn-loading" onclick="changeStatus('loading')">Carregando</button>
+        <button class="btn-connected" onclick="changeStatus('connected')">Conectado</button>
+        <button class="btn-disconnected" onclick="changeStatus('disconnected')">Desconectado</button>
+        <button class="btn-error" onclick="changeStatus('error')">Erro</button>
+    </div>
+    
+    <div class="log-container">
+        <h2>Log de Eventos</h2>
+        <div id="logEntries"></div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        // Conectar ao servidor Socket.IO
+        const socket = io();
+        
+        // Elementos da interface
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const lastError = document.getElementById('lastError');
+        const connectedAt = document.getElementById('connectedAt');
+        const qrContainer = document.getElementById('qrContainer');
+        const qrCode = document.getElementById('qrCode');
+        const logEntries = document.getElementById('logEntries');
+        
+        // Função para adicionar entrada de log
+        function addLogEntry(message) {
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logEntries.appendChild(entry);
+            logEntries.scrollTop = logEntries.scrollHeight;
+        }
+        
+        // Função para atualizar o status na interface
+        function updateStatus(status) {
+            // Remover todas as classes de status
+            statusDot.className = 'status-dot';
+            
+            // Adicionar classe de acordo com o status
+            switch(status.status) {
+                case 'connected':
+                    statusDot.classList.add('status-connected');
+                    statusText.textContent = 'Conectado';
+                    qrContainer.style.display = 'none';
+                    break;
+                case 'disconnected':
+                    statusDot.classList.add('status-disconnected');
+                    statusText.textContent = 'Desconectado';
+                    qrContainer.style.display = 'none';
+                    break;
+                case 'loading':
+                    statusDot.classList.add('status-loading');
+                    statusText.textContent = 'Carregando';
+                    qrContainer.style.display = 'none';
+                    break;
+                case 'qr_received':
+                    statusDot.classList.add('status-qr');
+                    statusText.textContent = 'QR Code Recebido';
+                    qrContainer.style.display = 'block';
+                    break;
+                case 'error':
+                    statusDot.classList.add('status-error');
+                    statusText.textContent = 'Erro';
+                    qrContainer.style.display = 'none';
+                    break;
+                case 'initializing':
+                    statusDot.classList.add('status-initializing');
+                    statusText.textContent = 'Inicializando';
+                    qrContainer.style.display = 'none';
+                    break;
+                default:
+                    statusDot.classList.add('status-disconnected');
+                    statusText.textContent = status.status || 'Desconhecido';
+                    qrContainer.style.display = 'none';
+            }
+            
+            // Atualizar informações adicionais
+            lastError.textContent = status.lastError || 'Nenhum';
+            connectedAt.textContent = status.connectedAt || 'Não conectado';
+            
+            // Adicionar entrada de log
+            addLogEntry(`Status alterado para: ${status.status}`);
+        }
+        
+        // Função para mudar o status
+        function changeStatus(newStatus) {
+            const statusUpdate = { status: newStatus };
+            
+            // Adicionar informações adicionais dependendo do status
+            if (newStatus === 'connected') {
+                statusUpdate.connectedAt = new Date().toISOString();
+                statusUpdate.lastError = null;
+            } else if (newStatus === 'qr_received') {
+                statusUpdate.lastQRCode = 'qr-code-simulado-' + Date.now();
+            } else if (newStatus === 'error' || newStatus === 'disconnected') {
+                statusUpdate.lastError = `Simulação de ${newStatus} em ${new Date().toLocaleTimeString()}`;
+                statusUpdate.connectedAt = null;
+            }
+            
+            // Enviar para o servidor
+            socket.emit('change-status', statusUpdate);
+            addLogEntry(`Solicitando mudança para: ${newStatus}`);
+        }
+        
+        // Receber atualizações de status do servidor
+        socket.on('whatsapp-status', (status) => {
+            console.log('Status recebido:', status);
+            updateStatus(status);
+            
+            // Se tiver QR code, mostrar
+            if (status.lastQRCode && status.status === 'qr_received') {
+                qrCode.innerHTML = `<p>QR Code simulado: ${status.lastQRCode}</p>`;
+                qrContainer.style.display = 'block';
+            }
+        });
+        
+        // Eventos de conexão do Socket.IO
+        socket.on('connect', () => {
+            addLogEntry(`Socket.IO conectado (ID: ${socket.id})`);
+        });
+        
+        socket.on('disconnect', () => {
+            addLogEntry('Socket.IO desconectado');
+        });
+        
+        socket.on('connect_error', (error) => {
+            addLogEntry(`Erro de conexão: ${error.message}`);
+        });
+        
+        // Inicialização
+        addLogEntry('Página carregada. Aguardando conexão com o servidor...');
+    </script>
+</body>
+</html>

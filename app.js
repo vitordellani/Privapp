@@ -39,6 +39,11 @@ app.use(session({
 
 app.use(express.json());
 
+// Servir arquivos estáticos ANTES das rotas protegidas
+app.use('/media', express.static(MEDIA_DIR));
+app.use(express.static(path.join(__dirname, 'public')));
+app.use('/groupPhotos.json', express.static(path.join(__dirname, 'groupPhotos.json')));
+
 // Middleware de autenticação
 function requireAuth(req, res, next) {
   if (req.session && req.session.user) {
@@ -334,37 +339,85 @@ app.get('/', requireAuth, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Servir arquivos estáticos APÓS as rotas principais
-app.use('/media', express.static(MEDIA_DIR));
-app.use('/css', express.static(path.join(__dirname, 'public')));
-app.use('/js', express.static(path.join(__dirname, 'public')));
-app.use('/img', express.static(path.join(__dirname, 'public')));
-app.use('/groupPhotos.json', express.static(path.join(__dirname, 'groupPhotos.json')));
+// Arquivos estáticos já configurados acima
 
 let whatsappClient = null;
 let meuNome = null;
 let meuNumero = null;
+let whatsappStatus = {
+  status: 'initializing',
+  lastQRCode: null,
+  lastError: null,
+  connectedAt: null
+};
 
 // WhatsApp client
 const client = new Client({
   authStrategy: new LocalAuth(),
   puppeteer: {
     args: ['--no-sandbox', '--disable-setuid-sandbox']
+  },
+  webVersionCache: {
+    type: 'remote',
+    remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html'
   }
 });
 whatsappClient = client;
 
-client.on('qr', qr => {
+client.on('qr', (qr) => {
   qrcode.generate(qr, { small: true });
   console.log('Escaneie o QR code acima com o WhatsApp!');
+  whatsappStatus.status = 'qr_received';
+  whatsappStatus.lastQRCode = qr;
+  io.emit('whatsapp-status', { status: 'qr_received', qr });
+  
+  // Na versão 1.33.2, é recomendável regenerar o QR code após um tempo
+  setTimeout(() => {
+    if (whatsappStatus.status === 'qr_received') {
+      console.log('QR code expirado, aguardando novo QR...');
+      whatsappStatus.status = 'qr_expired';
+      io.emit('whatsapp-status', { status: 'qr_expired' });
+    }
+  }, 60000); // 60 segundos - tempo aproximado de expiração do QR
+});
+
+// Evento de desconexão
+client.on('disconnected', (reason) => {
+  console.log('WhatsApp desconectado:', reason);
+  whatsappStatus.status = 'disconnected';
+  whatsappStatus.lastError = reason;
+  whatsappStatus.connectedAt = null;
+  io.emit('whatsapp-status', { status: 'disconnected', reason });
+});
+
+// Evento de falha de autenticação
+client.on('auth_failure', (msg) => {
+  console.error('Falha na autenticação do WhatsApp:', msg);
+  whatsappStatus.status = 'auth_failure';
+  whatsappStatus.lastError = msg;
+  io.emit('whatsapp-status', { status: 'auth_failure', message: msg });
+});
+
+// Evento de erro
+client.on('error', (err) => {
+  console.error('Erro no cliente WhatsApp:', err);
+  whatsappStatus.status = 'error';
+  whatsappStatus.lastError = err.message;
+  io.emit('whatsapp-status', { status: 'error', message: err.message });
 });
 
 client.on('ready', async () => {
   console.log('Bot pronto!');
+  whatsappStatus.status = 'connected';
+  whatsappStatus.lastError = null;
+  whatsappStatus.connectedAt = new Date().toISOString();
+  io.emit('whatsapp-status', { status: 'connected' });
   try {
-    const info = await client.getMe();
-    meuNumero = info.id._serialized;
-    meuNome = info.pushname || info.name || meuNumero;
+    // Usando client.info em vez de client.getMe() na versão 1.33.2
+    if (client.info) {
+      meuNumero = client.info.wid._serialized;
+      meuNome = client.info.pushname || client.info.name || meuNumero;
+    }
   } catch (e) {
     meuNome = 'Você';
     meuNumero = null;
@@ -589,12 +642,15 @@ client.on('message_create', async (msg) => {
         const media = await msg.downloadMedia();
         if (media) {
           mimetype = media.mimetype;
-          const ext = mimetype.split('/')[1];
+          // Extrair extensão de forma mais segura para compatibilidade com v1.33.2
+          const ext = mimetype.split('/')[1]?.split(';')[0] || 'bin';
           mediaFilename = `media_${Date.now()}.${ext}`;
           const filepath = path.join(MEDIA_DIR, mediaFilename);
           fs.writeFileSync(filepath, media.data, 'base64');
+          console.log(`[MEDIA] Mídia salva com sucesso: ${mediaFilename}`);
         }
       } catch (e) {
+        console.error('[MEDIA] Erro ao baixar mídia:', e);
         mediaError = 'Não foi possível baixar a mídia automaticamente.';
       }
     }
@@ -624,12 +680,15 @@ client.on('message', async (msg) => {
         const media = await msg.downloadMedia();
         if (media) {
           mimetype = media.mimetype;
-          const ext = mimetype.split('/')[1];
+          // Extrair extensão de forma mais segura para compatibilidade com v1.33.2
+          const ext = mimetype.split('/')[1]?.split(';')[0] || 'bin';
           mediaFilename = `media_${Date.now()}.${ext}`;
           const filepath = path.join(MEDIA_DIR, mediaFilename);
           fs.writeFileSync(filepath, media.data, 'base64');
+          console.log(`[MEDIA] Mídia recebida salva com sucesso: ${mediaFilename}`);
         }
       } catch (e) {
+        console.error('[MEDIA] Erro ao baixar mídia recebida:', e);
         mediaError = 'Não foi possível baixar a mídia automaticamente.';
       }
     }
@@ -644,11 +703,11 @@ client.on('message', async (msg) => {
 client.on('message_reaction', async (reaction) => {
   console.log('[BACKEND][message_reaction][RAW]:', reaction);
 
-  // Corrija a extração dos campos
-  let emoji = reaction.emoji || reaction.reaction;
-  let msgId = (reaction.msgId && reaction.msgId.id) || reaction.msgId || (reaction._data && reaction._data.msgId && reaction._data.msgId.id);
-  let sender = reaction.senderId || reaction.author || (reaction.sender && (reaction.sender._serialized || reaction.sender));
-  let event = 'add'; // WhatsApp Web.js só dispara para adição
+  // Extração dos campos adaptada para a versão 1.33.2
+  let emoji = reaction.reaction;
+  let msgId = reaction.msgId;
+  let sender = reaction.senderId;
+  let event = reaction.reaction ? 'add' : 'remove'; // Na versão 1.33.2, reaction é null quando removida
 
   console.log('[BACKEND][message_reaction][PARSED]:', { emoji, event, msgId, sender });
 
@@ -658,6 +717,12 @@ client.on('message_reaction', async (reaction) => {
       const reactions = await db.getMessageReactions(msgId);
       io.emit('reacao-mensagem', { msgId, reactions });
       console.log('[BACKEND][message_reaction] Reação adicionada:', emoji, sender);
+    } else if (event === 'remove' && sender && msgId) {
+      // Na versão 1.33.2, também podemos receber eventos de remoção de reações
+      await db.removeReaction(msgId, sender);
+      const reactions = await db.getMessageReactions(msgId);
+      io.emit('reacao-mensagem', { msgId, reactions });
+      console.log('[BACKEND][message_reaction] Reação removida por:', sender);
     }
   } catch (error) {
     console.error('[BACKEND][message_reaction] Erro ao processar reação:', error);
@@ -802,6 +867,145 @@ app.post('/api/clear', async (req, res) => {
   }
 });
 
+// Endpoint para verificar o status do WhatsApp
+app.get('/api/whatsapp-status', requireAuth, (req, res) => {
+  res.json(whatsappStatus);
+});
+
+// Endpoint para reiniciar a conexão do WhatsApp
+// Rota para desconectar o WhatsApp
+app.post('/api/whatsapp-disconnect', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    console.log('Desconectando cliente WhatsApp...');
+    
+    // Atualiza o status
+    whatsappStatus.status = 'disconnecting';
+    io.emit('whatsapp-status', { status: 'disconnecting' });
+    
+    // Tenta desconectar o cliente atual se existir
+    if (whatsappClient) {
+      try {
+        await whatsappClient.destroy();
+        console.log('Cliente WhatsApp desconectado com sucesso');
+        whatsappStatus.status = 'disconnected';
+        io.emit('whatsapp-status', { status: 'disconnected' });
+        res.json({ success: true });
+      } catch (err) {
+        console.error('Erro ao desconectar cliente WhatsApp:', err);
+        whatsappStatus.status = 'error';
+        whatsappStatus.lastError = err.message;
+        io.emit('whatsapp-status', { status: 'error', error: err.message });
+        res.status(500).json({ success: false, error: err.message });
+      }
+    } else {
+      console.log('Nenhum cliente WhatsApp para desconectar');
+      whatsappStatus.status = 'disconnected';
+      io.emit('whatsapp-status', { status: 'disconnected' });
+      res.json({ success: true });
+    }
+  } catch (error) {
+    console.error('Erro ao processar solicitação de desconexão:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/whatsapp-restart', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    console.log('Reiniciando cliente WhatsApp...');
+    
+    // Atualiza o status
+    whatsappStatus.status = 'restarting';
+    io.emit('whatsapp-status', { status: 'restarting' });
+    
+    // Tenta desconectar o cliente atual se existir
+    if (whatsappClient) {
+      try {
+        await whatsappClient.destroy();
+        console.log('Cliente WhatsApp desconectado com sucesso');
+      } catch (err) {
+        console.error('Erro ao desconectar cliente WhatsApp:', err);
+      }
+    }
+    
+    // Inicializa um novo cliente
+    const client = new Client({
+      authStrategy: new LocalAuth(),
+      puppeteer: {
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+      }
+    });
+    
+    // Registra os eventos no novo cliente
+    client.on('qr', qr => {
+      qrcode.generate(qr, { small: true });
+      console.log('Escaneie o QR code acima com o WhatsApp!');
+      whatsappStatus.status = 'qr_received';
+      whatsappStatus.lastQRCode = qr;
+      io.emit('whatsapp-status', { status: 'qr_received', qr });
+    });
+    
+    client.on('ready', async () => {
+      console.log('Bot pronto!');
+      whatsappStatus.status = 'connected';
+      whatsappStatus.lastError = null;
+      whatsappStatus.connectedAt = new Date().toISOString();
+      io.emit('whatsapp-status', { status: 'connected' });
+      
+      try {
+        // Usando client.info em vez de client.getMe() na versão 1.33.2
+        if (client.info) {
+          meuNumero = client.info.wid._serialized;
+          meuNome = client.info.pushname || client.info.name || meuNumero;
+        }
+      } catch (e) {
+        meuNome = 'Você';
+        meuNumero = null;
+      }
+    });
+    
+    client.on('disconnected', (reason) => {
+      console.log('WhatsApp desconectado:', reason);
+      whatsappStatus.status = 'disconnected';
+      whatsappStatus.lastError = reason;
+      whatsappStatus.connectedAt = null;
+      io.emit('whatsapp-status', { status: 'disconnected', reason });
+    });
+    
+    client.on('auth_failure', (msg) => {
+      console.error('Falha na autenticação do WhatsApp:', msg);
+      whatsappStatus.status = 'auth_failure';
+      whatsappStatus.lastError = msg;
+      io.emit('whatsapp-status', { status: 'auth_failure', message: msg });
+    });
+    
+    client.on('error', (err) => {
+      console.error('Erro no cliente WhatsApp:', err);
+      whatsappStatus.status = 'error';
+      whatsappStatus.lastError = err.message;
+      io.emit('whatsapp-status', { status: 'error', message: err.message });
+    });
+    
+    // Evento de conexão
+    client.on('loading_screen', (percent, message) => {
+      console.log(`Carregando WhatsApp: ${percent}% - ${message}`);
+      whatsappStatus.status = 'loading';
+      io.emit('whatsapp-status', { status: 'loading', percent, message });
+    });
+    
+    // Inicia o cliente
+    client.initialize();
+    console.log('Cliente WhatsApp reinicializado');
+    whatsappClient = client;
+    
+    res.json({ success: true, message: 'Cliente WhatsApp reiniciado com sucesso' });
+  } catch (error) {
+    console.error('Erro ao reiniciar cliente WhatsApp:', error);
+    whatsappStatus.status = 'error';
+    whatsappStatus.lastError = error.message;
+    res.status(500).json({ error: 'Erro ao reiniciar cliente WhatsApp', details: error.message });
+  }
+});
+
 // Enviar mensagem via WhatsApp
 app.post('/api/send', async (req, res) => {
   const { to, message, replyTo } = req.body;
@@ -942,7 +1146,10 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
     // Adicionar assinatura do usuário como legenda da mídia
     const legendaComAssinatura = `*${req.session.user.username}*:`;
     
-    const sentMsg = await client.sendMessage(to, new (require('whatsapp-web.js').MessageMedia)(
+    // Importar MessageMedia da biblioteca atualizada
+    const { MessageMedia } = require('whatsapp-web.js');
+    
+    const sentMsg = await client.sendMessage(to, new MessageMedia(
       file.mimetype,
       media.toString('base64'),
       file.originalname
@@ -1280,7 +1487,15 @@ findAvailablePort(3000).then(port => {
   process.exit(1);
 });
 
+// Evento de conexão
+client.on('loading_screen', (percent, message) => {
+  console.log(`Carregando WhatsApp: ${percent}% - ${message}`);
+  whatsappStatus.status = 'loading';
+  io.emit('whatsapp-status', { status: 'loading', percent, message });
+});
+
 client.initialize();
+console.log('Cliente WhatsApp inicializado');
 
 // Exemplo ao receber uma nova mensagem (ajuste conforme sua lógica)
 function salvarMensagem(msg) {

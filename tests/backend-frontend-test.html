@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teste de Comunicação Backend-Frontend</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 {
+            color: #128C7E; /* Cor do WhatsApp */
+        }
+        .status-container {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .status-dot {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-connected { background-color: #25D366; }
+        .status-disconnected { background-color: #FF0000; }
+        .status-loading { background-color: #FFA500; }
+        .status-qr { background-color: #34B7F1; }
+        .status-error { background-color: #FF0000; }
+        .status-initializing { background-color: #FFA500; }
+        .status-authenticated { background-color: #34B7F1; }
+        
+        .control-panel {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+        
+        button {
+            padding: 8px 12px;
+            margin: 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        
+        .btn-restart { background-color: #34B7F1; color: white; }
+        
+        .qr-container {
+            margin-top: 20px;
+            text-align: center;
+            display: none;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        
+        .log-container {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f5f5f5;
+            height: 200px;
+            overflow-y: auto;
+        }
+        
+        .log-entry {
+            margin-bottom: 5px;
+            font-family: monospace;
+        }
+        
+        .api-container {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        
+        .api-result {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f5f5f5;
+            border-radius: 4px;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        
+        .debug-container {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #fffaf0;
+        }
+        
+        .debug-info {
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <h1>Teste de Comunicação Backend-Frontend</h1>
+    
+    <div class="status-container">
+        <h2>Status do WhatsApp</h2>
+        <p>
+            <span id="statusDot" class="status-dot status-initializing"></span>
+            <span id="statusText">Inicializando</span>
+        </p>
+        <p>Último erro: <span id="lastError">Nenhum</span></p>
+        <p>Conectado em: <span id="connectedAt">Não conectado</span></p>
+        <p>Socket.IO: <span id="socketStatus">Desconectado</span></p>
+    </div>
+    
+    <div class="qr-container" id="qrContainer">
+        <h2>QR Code</h2>
+        <p>Escaneie o QR code abaixo com o WhatsApp:</p>
+        <div id="qrCode"></div>
+    </div>
+    
+    <div class="control-panel">
+        <h2>Controles</h2>
+        <button class="btn-restart" id="restartBtn">Reiniciar WhatsApp</button>
+    </div>
+    
+    <div class="api-container">
+        <h2>Teste de API</h2>
+        <button id="apiTestBtn">Verificar Status via API</button>
+        <div class="api-result" id="apiResult">Resultado aparecerá aqui</div>
+    </div>
+    
+    <div class="debug-container">
+        <h2>Informações de Depuração</h2>
+        <div class="debug-info" id="debugInfo">
+            Aguardando informações...
+        </div>
+    </div>
+    
+    <div class="log-container">
+        <h2>Log de Eventos</h2>
+        <div id="logEntries"></div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        // Elementos da interface
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const lastError = document.getElementById('lastError');
+        const connectedAt = document.getElementById('connectedAt');
+        const socketStatus = document.getElementById('socketStatus');
+        const qrContainer = document.getElementById('qrContainer');
+        const qrCode = document.getElementById('qrCode');
+        const restartBtn = document.getElementById('restartBtn');
+        const apiTestBtn = document.getElementById('apiTestBtn');
+        const apiResult = document.getElementById('apiResult');
+        const debugInfo = document.getElementById('debugInfo');
+        const logEntries = document.getElementById('logEntries');
+        
+        // Função para adicionar entrada de log
+        function addLogEntry(message) {
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logEntries.appendChild(entry);
+            logEntries.scrollTop = logEntries.scrollHeight;
+        }
+        
+        // Função para atualizar o status na interface
+        function updateStatus(status) {
+            // Remover todas as classes de status
+            statusDot.className = 'status-dot';
+            
+            // Adicionar classe de acordo com o status
+            switch(status.status) {
+                case 'connected':
+                    statusDot.classList.add('status-connected');
+                    statusText.textContent = 'Conectado';
+                    qrContainer.style.display = 'none';
+                    break;
+                case 'disconnected':
+                    statusDot.classList.add('status-disconnected');
+                    statusText.textContent = 'Desconectado';
+                    qrContainer.style.display = 'none';
+                    break;
+                case 'loading':
+                    statusDot.classList.add('status-loading');
+                    statusText.textContent = 'Carregando';
+                    qrContainer.style.display = 'none';
+                    break;
+                case 'qr_received':
+                    statusDot.classList.add('status-qr');
+                    statusText.textContent = 'QR Code Recebido';
+                    qrContainer.style.display = 'block';
+                    break;
+                case 'error':
+                    statusDot.classList.add('status-error');
+                    statusText.textContent = 'Erro';
+                    qrContainer.style.display = 'none';
+                    break;
+                case 'initializing':
+                    statusDot.classList.add('status-initializing');
+                    statusText.textContent = 'Inicializando';
+                    qrContainer.style.display = 'none';
+                    break;
+                case 'authenticated':
+                    statusDot.classList.add('status-authenticated');
+                    statusText.textContent = 'Autenticado';
+                    qrContainer.style.display = 'none';
+                    break;
+                default:
+                    statusDot.classList.add('status-disconnected');
+                    statusText.textContent = status.status || 'Desconhecido';
+                    qrContainer.style.display = 'none';
+            }
+            
+            // Atualizar informações adicionais
+            lastError.textContent = status.lastError || 'Nenhum';
+            connectedAt.textContent = status.connectedAt || 'Não conectado';
+            
+            // Atualizar informações de depuração
+            debugInfo.textContent = JSON.stringify(status, null, 2);
+            
+            // Adicionar entrada de log
+            addLogEntry(`Status alterado para: ${status.status}`);
+            
+            // Se tiver QR code, mostrar
+            if (status.lastQRCode && status.status === 'qr_received') {
+                // Em um ambiente real, você usaria uma biblioteca como qrcode.js
+                // para gerar o QR code a partir da string
+                qrCode.textContent = 'QR Code recebido (simulado)';
+                qrContainer.style.display = 'block';
+            }
+        }
+        
+        // Conectar ao servidor Socket.IO
+        let socket;
+        try {
+            socket = io();
+            
+            socket.on('connect', () => {
+                socketStatus.textContent = `Conectado (ID: ${socket.id})`;
+                addLogEntry(`Socket.IO conectado (ID: ${socket.id})`);
+            });
+            
+            socket.on('disconnect', () => {
+                socketStatus.textContent = 'Desconectado';
+                addLogEntry('Socket.IO desconectado');
+            });
+            
+            socket.on('connect_error', (error) => {
+                socketStatus.textContent = `Erro: ${error.message}`;
+                addLogEntry(`Erro de conexão: ${error.message}`);
+            });
+            
+            // Receber atualizações de status do servidor
+            socket.on('whatsapp-status', (status) => {
+                console.log('Status recebido via Socket.IO:', status);
+                updateStatus(status);
+                addLogEntry(`Status recebido via Socket.IO: ${status.status}`);
+            });
+        } catch (e) {
+            console.error('Erro ao inicializar Socket.IO:', e);
+            socketStatus.textContent = `Erro: ${e.message}`;
+            addLogEntry(`Erro ao inicializar Socket.IO: ${e.message}`);
+        }
+        
+        // Botão de reiniciar
+        restartBtn.addEventListener('click', () => {
+            if (socket) {
+                socket.emit('restart-whatsapp');
+                addLogEntry('Solicitação de reinicialização enviada');
+            } else {
+                addLogEntry('Socket.IO não está disponível');
+            }
+        });
+        
+        // Botão de teste de API
+        apiTestBtn.addEventListener('click', async () => {
+            try {
+                addLogEntry('Verificando status via API...');
+                const response = await fetch('/api/whatsapp-status');
+                const data = await response.json();
+                
+                apiResult.textContent = JSON.stringify(data, null, 2);
+                addLogEntry(`Status recebido via API: ${data.status}`);
+                
+                // Comparar com o status do Socket.IO
+                const currentStatus = statusText.textContent;
+                if (data.status !== currentStatus) {
+                    addLogEntry(`AVISO: Status da API (${data.status}) difere do Socket.IO (${currentStatus})`);
+                }
+            } catch (e) {
+                apiResult.textContent = `Erro: ${e.message}`;
+                addLogEntry(`Erro ao verificar status via API: ${e.message}`);
+            }
+        });
+        
+        // Verificar status inicial via API
+        async function checkInitialStatus() {
+            try {
+                addLogEntry('Verificando status inicial via API...');
+                const response = await fetch('/api/whatsapp-status');
+                const data = await response.json();
+                
+                updateStatus(data);
+                addLogEntry(`Status inicial: ${data.status}`);
+            } catch (e) {
+                addLogEntry(`Erro ao verificar status inicial: ${e.message}`);
+            }
+        }
+        
+        // Inicialização
+        addLogEntry('Página carregada. Verificando status inicial...');
+        checkInitialStatus();
+    </script>
+</body>
+</html>

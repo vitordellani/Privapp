@@ -456,14 +456,28 @@ class Database {
   }
 
   // Remover reação
-  removeReaction(messageId, emoji, userId) {
+  removeReaction(messageId, userId, emoji = null) {
     return new Promise((resolve, reject) => {
-      const sql = `
-        DELETE FROM reactions 
-        WHERE message_id = ? AND emoji = ? AND user_id = ?
-      `;
+      let sql;
+      let params;
+      
+      if (emoji) {
+        // Se o emoji for fornecido, remove apenas a reação específica
+        sql = `
+          DELETE FROM reactions 
+          WHERE message_id = ? AND emoji = ? AND user_id = ?
+        `;
+        params = [messageId, emoji, userId];
+      } else {
+        // Se o emoji não for fornecido, remove todas as reações do usuário para a mensagem
+        sql = `
+          DELETE FROM reactions 
+          WHERE message_id = ? AND user_id = ?
+        `;
+        params = [messageId, userId];
+      }
 
-      this.db.run(sql, [messageId, emoji, userId], function(err) {
+      this.db.run(sql, params, function(err) {
         if (err) {
           console.error('Erro ao remover reação:', err);
           reject(err);

@@ -36,12 +36,70 @@ body {
   justify-content: space-between;
   max-width: 1200px;
   margin: 0 auto;
-}
-
 .logo-container {
   display: flex;
   align-items: center;
-  gap: 12px;
+}
+
+/* Indicador de status do WhatsApp */
+.whatsapp-status-indicator {
+  display: flex;
+  align-items: center;
+  margin-left: 10px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  background-color: rgba(0, 0, 0, 0.1);
+  cursor: pointer;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 5px;
+}
+
+.status-dot.connected {
+  background-color: #25D366;
+}
+
+.status-dot.disconnected {
+  background-color: #FF4136;
+}
+
+.status-dot.loading {
+  background-color: #FFDC00;
+  animation: pulse 1.5s infinite;
+}
+
+.status-dot.qr_received {
+  background-color: #0074D9;
+}
+
+.status-dot.error {
+  background-color: #FF4136;
+}
+
+.status-dot.auth_failure {
+  background-color: #FF851B;
+}
+
+.status-text {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 1;
+  }
+}  gap: 12px;
 }
 
 .logo-icon {
@@ -2149,7 +2207,8 @@ body.darkmode .current-user {
 .btn-action,
 .btn-attach,
 .btn-send,
-.back-button {
+.back-button,
+.btn-carregar-mais {
   position: relative;
   overflow: hidden;
 }
@@ -2157,7 +2216,8 @@ body.darkmode .current-user {
 .btn-action::after,
 .btn-attach::after,
 .btn-send::after,
-.back-button::after {
+.back-button::after,
+.btn-carregar-mais::after {
   content: '';
   position: absolute;
   top: 50%;
@@ -2173,9 +2233,85 @@ body.darkmode .current-user {
 .btn-action:active::after,
 .btn-attach:active::after,
 .btn-send:active::after,
-.back-button:active::after {
+.back-button:active::after,
+.btn-carregar-mais:active::after {
   width: 100px;
   height: 100px;
+}
+
+/* Botão de carregar mais mensagens */
+.carregar-mais-mensagens {
+  display: flex;
+  justify-content: center;
+  padding: 15px 0;
+  margin: 10px 0;
+}
+
+.btn-carregar-mais {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background-color: #f0f2f5;
+  border: none;
+  border-radius: 18px;
+  color: #1a5f3c;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+}
+
+.btn-carregar-mais:hover {
+  background-color: #e0e2e5;
+}
+
+.btn-carregar-mais:active {
+  transform: scale(0.98);
+}
+
+.loading-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(26, 95, 60, 0.3);
+  border-radius: 50%;
+  border-top-color: #1a5f3c;
+  animation: spin 1s linear infinite;
+  margin-right: 8px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Mensagem de final da conversa */
+.mensagem-final {
+  text-align: center;
+  padding: 10px;
+  margin: 15px 0;
+  color: #888;
+  font-size: 13px;
+  font-style: italic;
+}
+
+/* Versão dark mode */
+body.darkmode .btn-carregar-mais {
+  background-color: #2a2d2e;
+  color: #25d366;
+}
+
+body.darkmode .btn-carregar-mais:hover {
+  background-color: #3a3d3e;
+}
+
+body.darkmode .loading-spinner {
+  border-color: rgba(37, 211, 102, 0.3);
+  border-top-color: #25d366;
+}
+
+body.darkmode .mensagem-final {
+  color: #aaa;
 }
 
   /* Melhorias de acessibilidade mobile */
@@ -2379,7 +2515,9 @@ body.darkmode .current-user {
   /* Melhora input */
   .message-input {
     font-size: 16px; /* Evita zoom no iOS */
+    appearance: none;
     -webkit-appearance: none;
+    -moz-appearance: none;
     border-radius: 20px;
   }
   
@@ -2709,6 +2847,7 @@ body.darkmode .current-user {
   text-overflow: ellipsis;
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
 }
 
@@ -2900,6 +3039,13 @@ body.darkmode .reply-preview .reply-content {
   border-bottom: 1px solid #f0f0f0;
 }
 
+.forward-contact-item label {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  cursor: pointer;
+}
+
 .forward-contact-item:last-child {
   border-bottom: none;
 }
@@ -2913,24 +3059,63 @@ body.darkmode .reply-preview .reply-content {
   border-left: 4px solid #25d366;
 }
 
-.forward-contact-checkbox {
+.forward-contact-item input[type="checkbox"] {
   margin-right: 12px;
   accent-color: #25d366;
 }
 
-.forward-contact-info {
-  flex: 1;
+.contact-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #f0f0f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
 }
 
-.forward-contact-name {
+.contact-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.contact-avatar .avatar-initial {
+  font-size: 18px;
+  font-weight: 500;
+  color: #555;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #e1e1e1;
+}
+
+body.darkmode .contact-avatar {
+  background: #3a3d41;
+}
+
+body.darkmode .contact-avatar .avatar-initial {
+  color: #e0e0e0;
+  background: #444;
+}
+
+.contact-name {
   font-weight: 500;
   color: #333;
   margin-bottom: 2px;
+  margin-left: 12px;
+  display: block;
 }
 
-.forward-contact-number {
+.contact-number {
   font-size: 12px;
   color: #666;
+  margin-left: 12px;
+  display: block;
 }
 
 .forward-modal-actions {
@@ -2996,6 +3181,14 @@ body.darkmode .forward-contact-item {
 
 body.darkmode .forward-contact-item:hover {
   background: #3a3d41;
+}
+
+body.darkmode .contact-name {
+  color: #e0e0e0;
+}
+
+body.darkmode .contact-number {
+  color: #aaa;
 }
 
 body.darkmode .forward-contact-item.selected {

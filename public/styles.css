@@ -900,22 +900,86 @@ body {
   gap: 2px;
   margin-left: 8px;
   font-size: 12px;
+  transition: all 0.3s ease;
 }
 
 .delivery-status .status-icon {
   font-size: 14px;
+  transition: all 0.3s ease;
 }
 
+/* Status: Enviando */
+.delivery-status.sending .status-icon {
+  color: #999;
+  animation: pulse 1.5s infinite;
+}
+
+/* Status: Enviada */
 .delivery-status.sent .status-icon {
   color: #999;
 }
 
+/* Status: Entregue */
 .delivery-status.delivered .status-icon {
   color: #999;
 }
 
+/* Status: Lida */
 .delivery-status.read .status-icon {
   color: #4CAF50;
+}
+
+/* Status: Falha */
+.delivery-status.failed .status-icon {
+  color: #f44336;
+  animation: shake 0.5s ease-in-out;
+}
+
+/* Animação para status de envio */
+@keyframes pulse {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Animação para falha */
+@keyframes shake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-2px);
+  }
+  75% {
+    transform: translateX(2px);
+  }
+}
+
+/* Estilos específicos para modo escuro */
+body.darkmode .delivery-status.sending .status-icon {
+  color: #bbb;
+}
+
+body.darkmode .delivery-status.sent .status-icon,
+body.darkmode .delivery-status.delivered .status-icon {
+  color: #bbb;
+}
+
+body.darkmode .delivery-status.read .status-icon {
+  color: #66bb6a;
+}
+
+body.darkmode .delivery-status.failed .status-icon {
+  color: #ef5350;
 }
 
 .bubble img, .bubble video {
@@ -2812,8 +2876,54 @@ body.darkmode .mensagem-final {
   to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes smoothUpdate {
+  0% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(0.98); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
 .chat-item {
   animation: fadeIn 0.3s ease;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.chat-list.updating {
+  transition: opacity 0.1s ease-in-out;
+}
+
+.chat-list.updating .chat-item {
+  animation: smoothUpdate 0.15s ease-in-out;
+}
+
+/* Transições suaves para elementos clicáveis */
+.chat-avatar,
+.chat-info,
+.chat-name,
+.chat-name-text,
+.chat-last-message,
+.chat-time {
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+
+.chat-avatar:hover,
+.chat-info:hover,
+.chat-name:hover,
+.chat-name-text:hover,
+.chat-last-message:hover,
+.chat-time:hover {
+  transform: translateY(-1px);
+}
+
+/* Feedback visual para cliques */
+.chat-avatar:active,
+.chat-info:active,
+.chat-name:active,
+.chat-name-text:active,
+.chat-last-message:active,
+.chat-time:active {
+  transform: scale(0.98);
+  transition: transform 0.1s ease;
 }
 
 /* Sistema de Resposta */

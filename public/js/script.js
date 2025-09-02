@@ -25,12 +25,74 @@ let ultimoTimestampRenderizado = null;
 let groupPhotos = {};
 let ultimaRenderizacaoContatos = ''; // Hash para verificar mudanças
 let mensagensLidas = new Set(); // Set para rastrear mensagens lidas
+let debounceAtualizacaoInterface = null; // Timer para debounce da atualização da interface
 let whatsappStatus = {
   status: 'disconnected',
   lastQRCode: null,
   lastError: null,
   connectedAt: null
 };
+
+// Sistema de rastreamento de status de mensagens
+let mensagensPendentes = new Map(); // Map<tempId, {timestamp, to, message, status}>
+let contadorMensagemTemp = 0;
+let estadosDigitacao = {}; // Objeto para rastrear estados de digitação dos contatos
+
+// Estados possíveis: 'sending', 'sent', 'delivered', 'read', 'failed'
+function gerarIdTemporario() {
+  return `temp_${Date.now()}_${++contadorMensagemTemp}`;
+}
+
+function adicionarMensagemPendente(tempId, dados) {
+  mensagensPendentes.set(tempId, {
+    ...dados,
+    status: 'sending',
+    timestamp: Date.now()
+  });
+}
+
+function atualizarStatusMensagem(tempId, novoStatus, msgId = null) {
+  const mensagem = mensagensPendentes.get(tempId);
+  if (mensagem) {
+    mensagem.status = novoStatus;
+    if (msgId) {
+      mensagem.msgId = msgId;
+    }
+    // Atualizar interface
+    atualizarIndicadorStatus(tempId, novoStatus);
+  }
+}
+
+function removerMensagemPendente(tempId) {
+  mensagensPendentes.delete(tempId);
+}
+
+function atualizarIndicadorStatus(tempId, status) {
+  const elemento = document.querySelector(`[data-temp-id="${tempId}"] .delivery-status`);
+  if (elemento) {
+    elemento.className = `delivery-status ${status}`;
+    const icone = elemento.querySelector('.status-icon');
+    if (icone) {
+      switch (status) {
+        case 'sending':
+          icone.innerHTML = '🕐';
+          break;
+        case 'sent':
+          icone.innerHTML = '✓';
+          break;
+        case 'delivered':
+          icone.innerHTML = '✓✓';
+          break;
+        case 'read':
+          icone.innerHTML = '✓✓';
+          break;
+        case 'failed':
+          icone.innerHTML = '❌';
+          break;
+      }
+    }
+  }
+}
 
 // Função para inicializar os sistemas de melhoria
 function initializeImprovementSystems() {
@@ -529,6 +591,35 @@ function gerarHashContatos(contatos) {
   return JSON.stringify(contatos).length + '_' + Object.keys(contatos).length;
 }
 
+// Função para atualização suave da interface com debounce
+function atualizarInterfaceSuave() {
+  // Limpar timer anterior se existir
+  if (debounceAtualizacaoInterface) {
+    clearTimeout(debounceAtualizacaoInterface);
+  }
+  
+  // Adicionar classe de transição suave
+  const container = safeGet('listaContatos');
+  if (container) {
+    container.classList.add('updating');
+  }
+  
+  // Definir novo timer com debounce de 50ms para responsividade
+  debounceAtualizacaoInterface = setTimeout(() => {
+    // Atualizar a interface
+    renderContatos();
+    
+    // Remover classe de transição após um pequeno delay
+    setTimeout(() => {
+      if (container) {
+        container.classList.remove('updating');
+      }
+    }, 100);
+    
+    debounceAtualizacaoInterface = null;
+  }, 50);
+}
+
 // Função para marcar mensagens como lidas
 function marcarMensagensComoLidas(contato) {
   const mensagensContato = todasMensagens.filter(m => 
@@ -828,8 +919,8 @@ function renderContatos() {
     const mensagensNaoLidas = contarMensagensNaoLidas(contato);
     const badgeNaoLidas = mensagensNaoLidas > 0 ? `<div class="unread-badge">${mensagensNaoLidas}</div>` : '';
 
-    // Indicador de digitação (simulado)
-    const isTyping = Math.random() > 0.95;
+    // Indicador de digitação baseado em dados reais
+    const isTyping = estadosDigitacao[contato] && estadosDigitacao[contato].isTyping;
     const typingIndicator = isTyping ? `
       <div class="typing-indicator">
         <span>Digitando</span>
@@ -846,7 +937,6 @@ function renderContatos() {
     if (contatoSelecionado === contato) {
       chatItem.classList.add('active');
     }
-    chatItem.onclick = () => selecionarContato(contato);
 
     chatItem.innerHTML = `
       <div class="chat-avatar">
@@ -865,6 +955,61 @@ function renderContatos() {
       <div class="chat-time">${horario}</div>
       <button class="btn-edit" onclick="event.stopPropagation(); editarContato('${contato}', '${nome}')">✎</button>
     `;
+
+    // Definir evento onclick APÓS innerHTML para garantir que funcione em toda a área
+    // Usar addEventListener com capture para garantir que funcione em todos os elementos filhos
+    chatItem.addEventListener('click', (event) => {
+      // Verificar se o clique não foi no botão de editar
+      if (event.target.classList.contains('btn-edit') || event.target.closest('.btn-edit')) {
+        return;
+      }
+      
+      // Prevenir propagação para evitar múltiplos cliques
+      event.stopPropagation();
+      
+      selecionarContato(contato);
+      // Atualização suave da interface após qualquer clique
+      atualizarInterfaceSuave();
+    }, true); // true = capture phase para capturar cliques em elementos filhos
+
+    // Adicionar event listeners específicos para todos os elementos filhos
+    // para garantir que qualquer clique dispare a atualização da interface
+    const adicionarListenerAtualizacao = (elemento) => {
+      if (elemento && !elemento.classList.contains('btn-edit')) {
+        elemento.addEventListener('click', (event) => {
+          if (!event.target.classList.contains('btn-edit') && !event.target.closest('.btn-edit')) {
+            event.stopPropagation();
+            selecionarContato(contato);
+            atualizarInterfaceSuave();
+          }
+        }, true);
+      }
+    };
+
+    // Aplicar listeners a todos os elementos filhos específicos
+    setTimeout(() => {
+      const chatAvatar = chatItem.querySelector('.chat-avatar');
+      const chatInfo = chatItem.querySelector('.chat-info');
+      const chatName = chatItem.querySelector('.chat-name');
+      const chatNameText = chatItem.querySelector('.chat-name-text');
+      const chatLastMessage = chatItem.querySelector('.chat-last-message');
+      const chatTime = chatItem.querySelector('.chat-time');
+      
+      adicionarListenerAtualizacao(chatAvatar);
+      adicionarListenerAtualizacao(chatInfo);
+      adicionarListenerAtualizacao(chatName);
+      adicionarListenerAtualizacao(chatNameText);
+      adicionarListenerAtualizacao(chatLastMessage);
+      adicionarListenerAtualizacao(chatTime);
+      
+      // Adicionar listeners para todos os divs filhos do avatar
+      const avatarChildren = chatAvatar?.querySelectorAll('div');
+      avatarChildren?.forEach(adicionarListenerAtualizacao);
+      
+      // Adicionar listeners para todos os spans filhos
+      const spanChildren = chatItem.querySelectorAll('span');
+      spanChildren?.forEach(adicionarListenerAtualizacao);
+    }, 0);
 
     container.appendChild(chatItem);
   });
@@ -1429,12 +1574,61 @@ function renderMensagens(filtro = '', carregarAnteriores = false) {
     });
     reactionsHtml += `<button class="btn-reagir" data-timestamp="${msg.timestamp}">+</button></div>`;
 
-    // Status de entrega (simulado)
-    const deliveryStatus = enviada ? `
-      <div class="delivery-status ${Math.random() > 0.5 ? 'read' : 'delivered'}">
-        <span class="status-icon">${Math.random() > 0.5 ? '✓✓' : '✓'}</span>
-      </div>
-    ` : '';
+    // Status de entrega baseado no estado real da mensagem
+    let deliveryStatus = '';
+    if (enviada) {
+      let statusClass = 'delivered';
+      let statusIcon = '✓✓';
+      
+      // Verificar se é uma mensagem pendente
+      if (msg.tempId && mensagensPendentes.has(msg.tempId)) {
+        const mensagemPendente = mensagensPendentes.get(msg.tempId);
+        statusClass = mensagemPendente.status;
+        switch (mensagemPendente.status) {
+          case 'sending':
+            statusIcon = '🕐';
+            break;
+          case 'sent':
+            statusIcon = '✓';
+            break;
+          case 'delivered':
+            statusIcon = '✓✓';
+            break;
+          case 'read':
+            statusIcon = '✓✓';
+            break;
+          case 'failed':
+            statusIcon = '❌';
+            break;
+        }
+      } else if (msg.status) {
+        // Usar status da mensagem se disponível
+        statusClass = msg.status;
+        switch (msg.status) {
+          case 'sending':
+            statusIcon = '🕐';
+            break;
+          case 'sent':
+            statusIcon = '✓';
+            break;
+          case 'delivered':
+            statusIcon = '✓✓';
+            break;
+          case 'read':
+            statusIcon = '✓✓';
+            break;
+          case 'failed':
+            statusIcon = '❌';
+            break;
+        }
+      }
+      
+      deliveryStatus = `
+        <div class="delivery-status ${statusClass}">
+          <span class="status-icon">${statusIcon}</span>
+        </div>
+      `;
+    }
 
     // HTML para resposta (se esta mensagem é uma resposta)
     let replyHtml = '';
@@ -1469,7 +1663,8 @@ function renderMensagens(filtro = '', carregarAnteriores = false) {
       <div class="user-name-in-bubble">${msg.userName || 'Usuário'}</div>
     ` : '';
 
-    mensagensDiv.innerHTML += `<div class="msg ${enviada ? 'msg-enviada' : 'msg-recebida'}" data-message-id="${msg.id || msg.timestamp}" style="position:relative;">
+    const tempIdAttr = msg.tempId ? ` data-temp-id="${msg.tempId}"` : '';
+    mensagensDiv.innerHTML += `<div class="msg ${enviada ? 'msg-enviada' : 'msg-recebida'}" data-message-id="${msg.id || msg.timestamp}"${tempIdAttr} style="position:relative;">
   ${isGroup && !enviada ? fotoMsg : ''}
   <div class="bubble ${enviada ? 'enviada' : 'recebida'}" style="position:relative;">
     ${userAvatar}
@@ -1695,25 +1890,74 @@ function selecionarContato(contato) {
     salvarScrollContato(contatoSelecionado, mensagensDiv.parentElement.scrollTop);
   }
   
-  // Usar novos sistemas para marcar mensagens como lidas
-  if (contatoSelecionado) {
-    if (appState) {
-      appState.markChatAsRead(contatoSelecionado);
-    } else {
-      marcarMensagensComoLidas(contatoSelecionado);
-    }
-  }
-  
   contatoSelecionado = contato;
+  
+  // CRITÉRIO ÚNICO: Badge desaparece APENAS com o clique na conversa
+  // Remover badge imediatamente, sem dependência de scroll ou outros fatores
   naoLidas[contato] = 0;
+  
+  // Marcar todas as mensagens deste contato como lidas imediatamente
+  todasMensagens.forEach(msg => {
+    if ((msg.from === contato || msg.to === contato) && !msg.fromMe) {
+      msg.lida = true;
+      mensagensLidas.add(msg.timestamp || msg.id);
+    }
+  });
+  
+  // Forçar marcação como lida em todos os sistemas
+  if (appState) {
+    appState.markChatAsRead(contato);
+  }
+  marcarMensagensComoLidas(contato);
   
   // Reset das variáveis de controle de scroll para nova conversa
   isAutoScrolling = true;
   hasNewMessages = false;
   scrollPosition = 0;
   
-  // Remove badge imediatamente ao abrir a conversa
-  atualizarBadgeContato(contato, 0);
+  // Atualização imediata da interface visual
+  const chatItems = document.querySelectorAll('.chat-item');
+  chatItems.forEach(item => {
+    // Remover classe active de todos os itens
+    item.classList.remove('active');
+    
+    // Verificar se este item corresponde ao contato selecionado
+    const chatNameElement = item.querySelector('.chat-name-text');
+    const contactNumberElement = item.querySelector('.contact-number');
+    
+    let isCurrentChat = false;
+    
+    // Verificar por nome do contato
+    if (chatNameElement) {
+      const displayedName = chatNameElement.textContent.trim();
+      const contactName = getNomeContato(contato, contato);
+      isCurrentChat = displayedName === contactName || displayedName.includes(contato);
+    }
+    
+    // Verificar por número do contato se não encontrou por nome
+    if (!isCurrentChat && contactNumberElement) {
+      isCurrentChat = contactNumberElement.textContent.includes(contato);
+    }
+    
+    // Verificar se o onclick contém o contato (fallback)
+    if (!isCurrentChat && item.onclick) {
+      isCurrentChat = item.onclick.toString().includes(contato);
+    }
+    
+    if (isCurrentChat) {
+      // Adicionar classe active imediatamente
+      item.classList.add('active');
+      
+      // Remover badge imediatamente
+      const badge = item.querySelector('.unread-badge');
+      if (badge) {
+        badge.remove();
+      }
+    }
+  });
+  
+  // Forçar re-renderização para garantir consistência
+  ultimaRenderizacaoContatos = '';
   
   // Atualiza o header do chat
   atualizarHeaderChat(contato);
@@ -1798,8 +2042,26 @@ socket.on('nova-mensagem', msg => {
   // Verifica se a mensagem já existe para evitar duplicação
   const mensagemExistente = todasMensagens.find(existing => 
     existing.id === msg.id || 
+    existing.tempId === msg.tempId ||
     (existing.timestamp === msg.timestamp && existing.from === msg.from)
   );
+  
+  // Se a mensagem tem tempId e já existe uma mensagem local com esse tempId,
+  // substitui a mensagem local pela mensagem do servidor
+  if (msg.tempId && mensagensPendentes.has(msg.tempId)) {
+    const index = todasMensagens.findIndex(m => m.tempId === msg.tempId);
+    if (index !== -1) {
+      // Atualizar a mensagem existente com os dados do servidor
+      todasMensagens[index] = { ...todasMensagens[index], ...msg, status: 'sent' };
+      // Remover da lista de pendentes
+      removerMensagemPendente(msg.tempId);
+      // Re-renderizar para mostrar a atualização
+      if (contatoSelecionado && (msg.from === contatoSelecionado || msg.to === contatoSelecionado)) {
+        renderMensagens();
+      }
+      return;
+    }
+  }
   
   if (!mensagemExistente) {
     todasMensagens.push(msg);
@@ -2014,6 +2276,32 @@ function adicionarNovasMensagens() {
 }
 
 // Envio de mensagem
+// Função para adicionar mensagem local instantaneamente
+function adicionarMensagemLocal(tempId, message, replyTo = null) {
+  const agora = Date.now();
+  const mensagemLocal = {
+    id: null,
+    tempId: tempId,
+    timestamp: agora,
+    from: meuNumero,
+    to: contatoSelecionado,
+    body: message,
+    fromMe: true,
+    userName: null, // Será preenchido pela função existente
+    status: 'sending',
+    replyTo: replyTo
+  };
+  
+  // Adicionar à lista de mensagens
+  todasMensagens.push(mensagemLocal);
+  
+  // Re-renderizar mensagens para mostrar a nova mensagem
+  renderMensagens();
+  
+  // Scroll para o final
+  scrollToBottom(true);
+}
+
 safeGet('formEnvio').onsubmit = function(e) {
   e.preventDefault();
   if (!contatoSelecionado) return alert('Selecione um contato!');
@@ -2022,10 +2310,7 @@ safeGet('formEnvio').onsubmit = function(e) {
   // Permite enviar se houver texto OU arquivo
   if (!message.trim() && !arquivoSelecionado) return;
 
-  // NÃO adiciona mensagem localmente - deixa o servidor/socket fazer isso
-  // para evitar duplicação, especialmente com respostas
-
-  // Para mídia, NÃO adicione localmente!
+  // Para mídia, ainda não implementamos a visualização instantânea
   if (arquivoSelecionado) {
     const formData = new FormData();
     formData.append('to', contatoSelecionado);
@@ -2056,31 +2341,60 @@ safeGet('formEnvio').onsubmit = function(e) {
       }
     });
   } else if (message.trim()) {
-    const requestBody = { to: contatoSelecionado, message };
+    // Gerar ID temporário
+    const tempId = gerarIdTemporario();
     
-    // Adicionar informações de resposta se houver
+    // Preparar dados de resposta se houver
+    let replyToData = null;
     if (mensagemParaResponder) {
-      requestBody.replyTo = {
+      replyToData = {
         timestamp: mensagemParaResponder.timestamp,
         body: mensagemParaResponder.body || 'Mídia',
         from: mensagemParaResponder.from,
         senderName: mensagemParaResponder.from === meuNumero ? 'Você' : getNomeContato(mensagemParaResponder.from, mensagemParaResponder.from)
       };
-      
-      // Limpar resposta
+    }
+    
+    // Adicionar mensagem instantaneamente na interface
+    adicionarMensagemLocal(tempId, message, replyToData);
+    
+    // Adicionar à lista de mensagens pendentes
+    adicionarMensagemPendente(tempId, {
+      to: contatoSelecionado,
+      message: message,
+      replyTo: replyToData
+    });
+    
+    // Limpar campo de texto e resposta
+    safeGet('texto').value = '';
+    if (mensagemParaResponder) {
       cancelarResposta();
     }
     
+    // Preparar requisição
+    const requestBody = { to: contatoSelecionado, message, tempId: tempId };
+    if (replyToData) {
+      requestBody.replyTo = replyToData;
+    }
+    
+    // Enviar para o servidor
     fetch('/api/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody)
     }).then(r => r.json()).then(resp => {
       if (resp.ok) {
-        safeGet('texto').value = '';
+        // Atualizar status para 'sent'
+        atualizarStatusMensagem(tempId, 'sent', resp.messageId);
       } else {
+        // Marcar como falha
+        atualizarStatusMensagem(tempId, 'failed');
         alert('Erro: ' + resp.error);
       }
+    }).catch(error => {
+      // Marcar como falha em caso de erro de rede
+      atualizarStatusMensagem(tempId, 'failed');
+      console.error('Erro ao enviar mensagem:', error);
     });
   }
 };
@@ -2368,6 +2682,62 @@ socket.on('reacao-mensagem', ({ msgTimestamp, msgId, reactions }) => {
       renderMensagens(safeGet('busca').value);
     });
   }
+});
+
+// Listener para atualizações de status de mensagem
+socket.on('message-status-update', ({ tempId, messageId, status }) => {
+  console.log('[FRONTEND][message-status-update] Recebida atualização de status:', { tempId, messageId, status });
+  
+  // Atualizar status na lista de mensagens pendentes
+  if (tempId && mensagensPendentes.has(tempId)) {
+    atualizarStatusMensagem(tempId, status, messageId);
+    
+    // Encontrar e atualizar a mensagem na lista principal
+    const mensagem = todasMensagens.find(m => m.tempId === tempId);
+    if (mensagem) {
+      mensagem.status = status;
+      if (messageId) {
+        mensagem.id = messageId;
+      }
+      
+      // Re-renderizar se estamos vendo o contato correto
+      if (contatoSelecionado && (mensagem.from === contatoSelecionado || mensagem.to === contatoSelecionado)) {
+        renderMensagens();
+      }
+    }
+  }
+});
+
+// Listener para estados de chat (incluindo digitação)
+socket.on('chat-state', ({ chatId, state, isTyping }) => {
+  console.log('[FRONTEND][chat-state] Estado do chat recebido:', { chatId, state, isTyping });
+  
+  // Atualizar estado de digitação
+  if (chatId) {
+    estadosDigitacao[chatId] = {
+      isTyping: isTyping,
+      timestamp: Date.now()
+    };
+    
+    // Re-renderizar contatos para mostrar/ocultar indicador
+    renderContatos();
+    
+    // Limpar estado de digitação após um tempo
+    setTimeout(() => {
+      if (estadosDigitacao[chatId] && estadosDigitacao[chatId].timestamp <= Date.now() - 5000) {
+        estadosDigitacao[chatId].isTyping = false;
+        renderContatos();
+      }
+    }, 5000);
+  }
+});
+
+// Listener alternativo para estados de digitação
+socket.on('typing-state', ({ state, timestamp }) => {
+  console.log('[FRONTEND][typing-state] Estado de digitação recebido:', { state, timestamp });
+  
+  // Processar informações de digitação se disponíveis
+  // Este é um fallback caso o evento chat-state não funcione
 });
 
 // ...Som de notificação...

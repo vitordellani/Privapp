@@ -705,7 +705,7 @@ client.on('message_reaction', async (reaction) => {
 
   // Extração dos campos adaptada para a versão 1.33.2
   let emoji = reaction.reaction;
-  let msgId = reaction.msgId;
+  let msgId = reaction.msgId?.id || reaction.msgId?._serialized || reaction.msgId; // Extrair ID corretamente
   let sender = reaction.senderId;
   let event = reaction.reaction ? 'add' : 'remove'; // Na versão 1.33.2, reaction é null quando removida
 
@@ -715,17 +715,63 @@ client.on('message_reaction', async (reaction) => {
     if (event === 'add' && emoji && sender && msgId) {
       await db.addReaction(msgId, emoji, sender);
       const reactions = await db.getMessageReactions(msgId);
-      io.emit('reacao-mensagem', { msgId, reactions });
+      
+      // Buscar a mensagem para obter o timestamp
+      const messages = await db.getAllMessages();
+      const message = messages.find(m => m.id === msgId);
+      const msgTimestamp = message ? message.timestamp : null;
+      
+      io.emit('reacao-mensagem', { msgId, msgTimestamp, reactions });
       console.log('[BACKEND][message_reaction] Reação adicionada:', emoji, sender);
     } else if (event === 'remove' && sender && msgId) {
       // Na versão 1.33.2, também podemos receber eventos de remoção de reações
       await db.removeReaction(msgId, sender);
       const reactions = await db.getMessageReactions(msgId);
-      io.emit('reacao-mensagem', { msgId, reactions });
+      
+      // Buscar a mensagem para obter o timestamp
+      const messages = await db.getAllMessages();
+      const message = messages.find(m => m.id === msgId);
+      const msgTimestamp = message ? message.timestamp : null;
+      
+      
+      io.emit('reacao-mensagem', { msgId, msgTimestamp, reactions });
       console.log('[BACKEND][message_reaction] Reação removida por:', sender);
     }
   } catch (error) {
     console.error('[BACKEND][message_reaction] Erro ao processar reação:', error);
+  }
+});
+
+// Listener para eventos de estado de chat (incluindo digitação)
+client.on('chat_state', (state) => {
+  console.log('[BACKEND][chat_state] Estado do chat:', state);
+  
+  try {
+    // Emitir estado de digitação para o frontend
+    io.emit('chat-state', {
+      chatId: state.chatId,
+      state: state.state,
+      isTyping: state.state === 'typing'
+    });
+  } catch (error) {
+    console.error('[BACKEND][chat_state] Erro ao processar estado do chat:', error);
+  }
+});
+
+// Listener alternativo para eventos de digitação
+client.on('change_state', (state) => {
+  console.log('[BACKEND][change_state] Mudança de estado:', state);
+  
+  // Este evento pode conter informações sobre digitação
+  if (state && state.includes && state.includes('typing')) {
+    try {
+      io.emit('typing-state', {
+        state: state,
+        timestamp: Date.now()
+      });
+    } catch (error) {
+      console.error('[BACKEND][change_state] Erro ao processar estado de digitação:', error);
+    }
   }
 });
 
@@ -1008,8 +1054,8 @@ app.post('/api/whatsapp-restart', requireAuth, requireAdmin, async (req, res) =>
 
 // Enviar mensagem via WhatsApp
 app.post('/api/send', async (req, res) => {
-  const { to, message, replyTo } = req.body;
-  console.log(`[ENVIO] Tentando enviar para: ${to} | body: "${message}" | replyTo:`, replyTo);
+  const { to, message, replyTo, tempId } = req.body;
+  console.log(`[ENVIO] Tentando enviar para: ${to} | body: "${message}" | tempId: ${tempId} | replyTo:`, replyTo);
   
   // Verificar se o usuário está autenticado
   if (!req.session || !req.session.user) {
@@ -1102,6 +1148,7 @@ app.post('/api/send', async (req, res) => {
       mediaError: null,
       reactions: [],
       id: sentMsg.id.id,
+      tempId: tempId, // Incluir tempId para identificação no frontend
       replyTo: replyTo || null, // Inclui informações de resposta
       userName: req.session.user.username, // Nome do usuário logado para assinatura
       userProfilePhoto: userProfilePhoto // Foto de perfil do usuário logado
@@ -1120,9 +1167,23 @@ app.post('/api/send', async (req, res) => {
     const socketKey = `${sentMsg.id.id}_${Date.now()}`;
     mensagensProcessadasViaSocket.add(socketKey);
     
+    // Emitir evento com tempId para atualização de status
     io.emit('nova-mensagem', obj);
+    
+    // Emitir evento específico para atualização de status da mensagem
+    if (tempId) {
+      io.emit('message-status-update', {
+        tempId: tempId,
+        messageId: sentMsg.id.id,
+        status: 'sent'
+      });
+    }
 
-    res.json({ ok: true });
+    res.json({ 
+      ok: true, 
+      messageId: sentMsg.id.id,
+      tempId: tempId 
+    });
   } catch (e) {
     console.log(`[ENVIO][ERRO] Falha ao enviar para: ${to} | body: "${message}" | erro: ${e.message}`);
     res.json({ ok: false, error: e.message });

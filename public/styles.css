@@ -3886,3 +3886,142 @@ body.darkmode .mobile-view-indicator {
   background: var(--success-color, #059669);
   box-shadow: 0 8px 25px rgba(5, 150, 105, 0.4);
 }
+
+/* ===== SISTEMA DE PRÉ-CARREGAMENTO INTELIGENTE ===== */
+
+/* Estados de carregamento para elementos de mídia */
+.loading {
+  position: relative;
+  opacity: 0.7;
+  transition: opacity 0.3s ease;
+}
+
+.loading::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  border: 2px solid #f3f3f3;
+  border-top: 2px solid #007bff;
+  border-radius: 50%;
+  animation: preloader-spin 1s linear infinite;
+  z-index: 10;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.loaded {
+  opacity: 1;
+  transition: opacity 0.3s ease;
+}
+
+.error {
+  opacity: 0.5;
+  filter: grayscale(100%);
+}
+
+.error::after {
+  content: '⚠️';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 16px;
+  z-index: 10;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 4px;
+  border-radius: 4px;
+}
+
+/* Animação de loading */
+@keyframes preloader-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Lazy loading placeholder */
+.lazy-placeholder {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: lazy-shimmer 1.5s infinite;
+}
+
+@keyframes lazy-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Otimizações para elementos de mídia */
+img[data-src], audio[data-src], video[data-src] {
+  transition: opacity 0.3s ease, filter 0.3s ease;
+}
+
+/* Estados específicos para imagens */
+img.loading {
+  min-height: 100px;
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+}
+
+img.loaded {
+  border: none;
+}
+
+/* Estados específicos para áudio */
+audio.loading {
+  opacity: 0.6;
+}
+
+audio.loaded {
+  opacity: 1;
+}
+
+/* Estados específicos para vídeo */
+video.loading {
+  background: #000;
+  min-height: 200px;
+}
+
+video.loaded {
+  background: transparent;
+}
+
+/* Modo escuro para pré-carregamento */
+.darkmode .loading::before {
+  border: 2px solid #333;
+  border-top: 2px solid #007bff;
+  background: rgba(0, 0, 0, 0.9);
+}
+
+.darkmode .lazy-placeholder {
+  background: linear-gradient(90deg, #2a2a2a 25%, #3a3a3a 50%, #2a2a2a 75%);
+  background-size: 200% 100%;
+}
+
+.darkmode img.loading {
+  background: #2a2a2a;
+  border: 1px solid #444;
+}
+
+.darkmode .error::after {
+  background: rgba(0, 0, 0, 0.9);
+}
+
+/* Responsividade */
+@media (max-width: 768px) {
+  .loading::before {
+    width: 16px;
+    height: 16px;
+    margin: -8px 0 0 -8px;
+  }
+}
+
+/* Performance otimizations */
+img[data-src], audio[data-src], video[data-src] {
+  will-change: opacity;
+  contain: layout style;
+}
+
+/* Fim dos estilos de pré-carregamento */

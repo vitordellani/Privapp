@@ -6,8 +6,39 @@ const http = require('http');
 const { Server } = require('socket.io');
 const session = require('express-session');
 const Keycloak = require('keycloak-connect');
+const AudioCompressor = require('./AudioCompressor');
+const PerformanceMonitor = require('./PerformanceMonitor');
 
 const MEDIA_DIR = path.join(__dirname, 'media');
+
+// Inicializar compressor de áudios
+const audioCompressor = new AudioCompressor({
+  inputDir: MEDIA_DIR,
+  outputDir: path.join(MEDIA_DIR, 'compressed'),
+  compressionQuality: 'medium',
+  maxConcurrentJobs: 2,
+  enableNormalization: true,
+  enableNoiseReduction: true
+});
+
+console.log('[SERVER] Sistema de compressão de áudios inicializado');
+
+// Inicializar monitor de performance
+const performanceMonitor = new PerformanceMonitor({
+  metricsInterval: 30000, // 30 segundos
+  healthCheckInterval: 60000, // 1 minuto
+  logDir: './logs',
+  alertThresholds: {
+    responseTime: 5000, // 5s para alta latência
+    memoryUsage: 80,
+    cpuUsage: 85,
+    errorRate: 5
+  },
+  trackLatencyOptimizations: true,
+  enableRealTimeAlerts: true
+});
+
+console.log('[SERVER] Sistema de monitoramento de performance inicializado');
 const MESSAGES_FILE = path.join(__dirname, 'messages.json');
 
 const app = express();
@@ -36,6 +67,29 @@ const io = new Server(server, {
   }
 });
 
+// Configurar referências do monitor
+performanceMonitor.setReferences({
+  server,
+  io,
+  database: null,
+  audioCompressor,
+  parallelRequestManager: null, // Será configurado no frontend
+  intelligentPreloader: null    // Será configurado no frontend
+});
+
+// Middleware para rastrear requisições
+app.use((req, res, next) => {
+  const startTime = Date.now();
+  
+  res.on('finish', () => {
+    const responseTime = Date.now() - startTime;
+    const success = res.statusCode < 400;
+    performanceMonitor.recordRequest(responseTime, success);
+  });
+  
+  next();
+});
+
 const memoryStore = new session.MemoryStore();
 app.use(session({
   secret: 'sua-chave-secreta',
@@ -49,8 +103,31 @@ app.use(keycloak.middleware());
 
 app.use(keycloak.protect());
 
-// Servir arquivos de mídia com cache otimizado
-app.use('/media', express.static(MEDIA_DIR, {
+// Middleware para servir arquivos de mídia com cache otimizado
+app.use('/media', async (req, res, next) => {
+  const filePath = path.join(MEDIA_DIR, req.path);
+  const compressedPath = path.join(MEDIA_DIR, 'compressed', req.path.replace(/\.(wav|ogg|m4a|aac)$/, '_compressed.mp3'));
+  
+  // Se é áudio e existe versão comprimida, servir a comprimida
+  if (/\.(mp3|wav|ogg|m4a|aac)$/i.test(req.path)) {
+    if (fs.existsSync(compressedPath)) {
+      console.log(`[SERVER] 📦 Servindo áudio comprimido: ${path.basename(compressedPath)}`);
+      req.url = req.url.replace(/\.(wav|ogg|m4a|aac)$/, '_compressed.mp3');
+      req.path = '/compressed' + req.path.replace(/\.(wav|ogg|m4a|aac)$/, '_compressed.mp3');
+    } else if (fs.existsSync(filePath)) {
+      // Comprimir automaticamente em background
+      audioCompressor.autoCompress(filePath).then(result => {
+        if (result.success) {
+          console.log(`[SERVER] ✅ Áudio comprimido automaticamente: ${path.basename(filePath)}`);
+        }
+      }).catch(err => {
+        console.warn(`[SERVER] ⚠️ Falha na compressão automática: ${err.message}`);
+      });
+    }
+  }
+  
+  next();
+}, express.static(MEDIA_DIR, {
   maxAge: '7d', // 7 dias de cache
   etag: true,
   lastModified: true,
@@ -85,6 +162,199 @@ app.get('/api/messages', (req, res) => {
     }
   }
   res.json(messages);
+});
+
+// Rotas para compressão de áudios
+app.get('/api/audio-compression/stats', (req, res) => {
+  try {
+    const stats = audioCompressor.getStats();
+    res.json({
+      success: true,
+      stats
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.post('/api/audio-compression/compress', async (req, res) => {
+  try {
+    const { filePath, quality } = req.body;
+    
+    if (!filePath) {
+      return res.status(400).json({
+        success: false,
+        error: 'Caminho do arquivo é obrigatório'
+      });
+    }
+    
+    const fullPath = path.join(MEDIA_DIR, filePath);
+    
+    if (!fs.existsSync(fullPath)) {
+      return res.status(404).json({
+        success: false,
+        error: 'Arquivo não encontrado'
+      });
+    }
+    
+    const result = await audioCompressor.compressAudio(fullPath, null, { quality });
+    
+    res.json(result);
+    
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.post('/api/audio-compression/batch', async (req, res) => {
+  try {
+    const { filePaths, quality, concurrency } = req.body;
+    
+    if (!Array.isArray(filePaths) || filePaths.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Lista de arquivos é obrigatória'
+      });
+    }
+    
+    const fullPaths = filePaths.map(fp => path.join(MEDIA_DIR, fp));
+    
+    // Verificar se todos os arquivos existem
+    const missingFiles = fullPaths.filter(fp => !fs.existsSync(fp));
+    if (missingFiles.length > 0) {
+      return res.status(404).json({
+        success: false,
+        error: `Arquivos não encontrados: ${missingFiles.map(f => path.basename(f)).join(', ')}`
+      });
+    }
+    
+    const results = await audioCompressor.compressBatch(fullPaths, { quality, concurrency });
+    
+    res.json({
+      success: true,
+      results
+    });
+    
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.delete('/api/audio-compression/cache', async (req, res) => {
+  try {
+    const { maxAge } = req.query;
+    const cleaned = await audioCompressor.cleanCache(maxAge ? parseInt(maxAge) : undefined);
+    
+    res.json({
+      success: true,
+      cleaned
+    });
+    
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Rotas para monitoramento de performance
+app.get('/api/monitoring/metrics', (req, res) => {
+  try {
+    const metrics = performanceMonitor.getMetrics();
+    res.json({
+      success: true,
+      metrics
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.get('/api/monitoring/health', async (req, res) => {
+  try {
+    const healthCheck = await performanceMonitor.performHealthChecks();
+    const healthScore = performanceMonitor.calculateHealthScore(healthCheck);
+    
+    res.json({
+      success: true,
+      health: healthCheck,
+      score: healthScore,
+      status: performanceMonitor.getHealthStatus(healthScore)
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.get('/api/monitoring/report', (req, res) => {
+  try {
+    const report = performanceMonitor.getPerformanceReport();
+    res.json({
+      success: true,
+      report
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.get('/api/monitoring/history', (req, res) => {
+  try {
+    const hours = parseInt(req.query.hours) || 24;
+    const history = performanceMonitor.getMetricsHistory(hours);
+    
+    res.json({
+      success: true,
+      history,
+      period: `${hours} hours`
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.get('/api/monitoring/alerts', (req, res) => {
+  try {
+    const metrics = performanceMonitor.getMetrics();
+    const activeAlerts = metrics.alerts.filter(alert => {
+      const alertTime = new Date(alert.timestamp).getTime();
+      const now = Date.now();
+      return (now - alertTime) < 3600000; // Últimas 1 hora
+    });
+    
+    res.json({
+      success: true,
+      alerts: activeAlerts,
+      total: metrics.alerts.length
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
 });
 
 // Limpar mensagens

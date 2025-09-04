@@ -38,7 +38,11 @@ let mensagensPendentes = new Map(); // Map<tempId, {timestamp, to, message, stat
 let contadorMensagemTemp = 0;
 let estadosDigitacao = {}; // Objeto para rastrear estados de digitação dos contatos
 
-// Sistema de persistência de estado local
+// Sistema de Paralelização de Requisições
+let requestManager = null;
+let useParallelRequests = true; // Flag para ativar/desativar paralelização
+
+// Configurações de estado local
 const ESTADO_LOCAL_KEY = 'privapp_estado';
 const ESTADO_EXPIRACAO_MS = 300000; // 5 minutos
 
@@ -235,6 +239,203 @@ function atualizarIndicadorStatus(tempId, status) {
   }
 }
 
+// Função para inicializar o sistema de paralelização
+function initializeParallelRequests() {
+  try {
+    // Verificar se ParallelRequestManager está disponível
+    if (typeof ParallelRequestManager === 'undefined') {
+      console.warn('[PARALLEL] ParallelRequestManager não carregado, desabilitando paralelização');
+      useParallelRequests = false;
+      return;
+    }
+    
+    // Criar instância do gerenciador
+    requestManager = new ParallelRequestManager(6); // 6 requisições simultâneas
+    
+    // Ajustar configurações baseado na conexão
+    if (navigator.connection) {
+      const connection = navigator.connection;
+      if (connection.effectiveType === 'slow-2g' || connection.effectiveType === '2g') {
+        requestManager.setMaxConcurrent(2);
+      } else if (connection.effectiveType === '3g') {
+        requestManager.setMaxConcurrent(4);
+      }
+    }
+    
+    console.log('[PARALLEL] Sistema de paralelização inicializado com sucesso');
+    useParallelRequests = true;
+    
+  } catch (error) {
+    console.error('[PARALLEL] Erro ao inicializar paralelização:', error);
+    useParallelRequests = false;
+  }
+}
+
+// Função para carregar mídia usando paralelização
+async function loadMediaParallel(mediaUrls, options = {}) {
+  if (!useParallelRequests || !requestManager || !Array.isArray(mediaUrls)) {
+    // Fallback para carregamento sequencial
+    return loadMediaSequential(mediaUrls, options);
+  }
+  
+  try {
+    const results = await requestManager.loadMediaBatch(mediaUrls, {
+      priority: options.priority || 'normal',
+      timeout: options.timeout || 15000
+    });
+    
+    return results;
+  } catch (error) {
+    console.error('[PARALLEL] Erro no carregamento paralelo, usando fallback:', error);
+    return loadMediaSequential(mediaUrls, options);
+  }
+}
+
+// Função de fallback para carregamento sequencial
+async function loadMediaSequential(mediaUrls, options = {}) {
+  const results = [];
+  
+  for (const url of mediaUrls) {
+    try {
+      const response = await fetch(url, {
+        timeout: options.timeout || 15000
+      });
+      
+      if (response.ok) {
+        const blob = await response.blob();
+        results.push(blob);
+      } else {
+        results.push({ error: `HTTP ${response.status}` });
+      }
+    } catch (error) {
+      results.push({ error: error.message });
+    }
+  }
+  
+  return results;
+}
+
+// Função para pré-carregar mídia próxima
+function preloadNearbyMedia() {
+  if (!useParallelRequests || !requestManager) return;
+  
+  try {
+    // Encontrar imagens e áudios visíveis ou próximos
+    const mediaElements = document.querySelectorAll('img[data-src], audio[data-src]');
+    const mediaUrls = [];
+    
+    mediaElements.forEach(element => {
+      const rect = element.getBoundingClientRect();
+      const isNearViewport = rect.top < window.innerHeight + 200 && rect.bottom > -200;
+      
+      if (isNearViewport && element.dataset.src) {
+        mediaUrls.push(element.dataset.src);
+      }
+    });
+    
+    if (mediaUrls.length > 0) {
+      requestManager.preloadMedia(mediaUrls);
+    }
+  } catch (error) {
+    console.debug('[PARALLEL] Erro no pré-carregamento:', error);
+  }
+}
+
+// Função para otimizar carregamento de imagens
+async function loadOptimizedImage(baseUrl, element) {
+  if (!useParallelRequests || !requestManager) {
+    // Fallback simples
+    element.src = baseUrl;
+    return;
+  }
+  
+  try {
+    const result = await requestManager.loadImageWithFallback(baseUrl, ['webp', 'jpg', 'png']);
+    
+    if (result && result.data) {
+      const objectUrl = URL.createObjectURL(result.data);
+      element.src = objectUrl;
+      
+      // Limpar URL após carregamento
+      element.onload = () => {
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      };
+    }
+  } catch (error) {
+    console.debug('[PARALLEL] Erro no carregamento otimizado, usando fallback:', error);
+    element.src = baseUrl;
+  }
+}
+
+// Função para configurar eventos de paralelização
+function setupParallelRequestEvents() {
+  if (!useParallelRequests || !requestManager) return;
+  
+  try {
+    // Pré-carregamento durante scroll (com debounce)
+    let scrollTimeout;
+    const messagesContainer = document.querySelector('.messages-container');
+    
+    if (messagesContainer) {
+      messagesContainer.addEventListener('scroll', () => {
+        clearTimeout(scrollTimeout);
+        scrollTimeout = setTimeout(() => {
+          preloadNearbyMedia();
+        }, 200);
+      });
+    }
+    
+    // Pré-carregamento quando uma conversa é selecionada
+    const originalSelecionarContato = window.selecionarContato;
+    if (typeof originalSelecionarContato === 'function') {
+      window.selecionarContato = function(contato) {
+        const result = originalSelecionarContato.apply(this, arguments);
+        
+        // Pré-carregar mídia da conversa após um pequeno delay
+        setTimeout(() => {
+          preloadNearbyMedia();
+        }, 500);
+        
+        return result;
+      };
+    }
+    
+    // Monitorar mudanças na qualidade da conexão
+    if (navigator.connection) {
+      navigator.connection.addEventListener('change', () => {
+        const connection = navigator.connection;
+        
+        if (connection.effectiveType === 'slow-2g' || connection.effectiveType === '2g') {
+          requestManager.setMaxConcurrent(2);
+        } else if (connection.effectiveType === '3g') {
+          requestManager.setMaxConcurrent(4);
+        } else {
+          requestManager.setMaxConcurrent(6);
+        }
+        
+        console.log(`[PARALLEL] Conexão alterada para ${connection.effectiveType}, ajustando paralelização`);
+      });
+    }
+    
+    // Limpeza de cache quando a página perde foco
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && requestManager) {
+        requestManager.clearExpiredCache();
+      }
+    });
+    
+    // Pré-carregamento inicial após carregamento da página
+    setTimeout(() => {
+      preloadNearbyMedia();
+    }, 2000);
+    
+    console.log('[PARALLEL] Eventos de paralelização configurados');
+    
+  } catch (error) {
+    console.error('[PARALLEL] Erro ao configurar eventos:', error);
+  }
+}
+
 // Função para inicializar os sistemas de melhoria
 function initializeImprovementSystems() {
   try {
@@ -253,13 +454,19 @@ function initializeImprovementSystems() {
     // Inicializar NotificationManager
     notificationManager = new NotificationManager();
     
+    // Inicializar sistema de paralelização
+    initializeParallelRequests();
+    
     // Inicializar monitoramento de status do WhatsApp
     initWhatsAppStatusMonitoring();
     
     // Configurar auto-salvamento em eventos importantes
-    setupAutoSaveEvents();
-    
-    console.log('[INIT] Sistemas de melhoria inicializados com sucesso');
+  setupAutoSaveEvents();
+  
+  // Configurar eventos de paralelização
+  setupParallelRequestEvents();
+  
+  console.log('[INIT] Sistemas de melhoria inicializados com sucesso');
   } catch (error) {
     console.error('[INIT] Erro ao inicializar sistemas de melhoria:', error);
   }

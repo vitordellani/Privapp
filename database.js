@@ -1,11 +1,13 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
+const DatabaseOptimizer = require('./database-optimizer');
 
 class Database {
   constructor() {
     this.dbPath = path.join(__dirname, 'messages.db');
     this.db = null;
+    this.optimizer = null;
     this.init();
   }
 
@@ -18,7 +20,11 @@ class Database {
           return;
         }
         console.log('Conectado ao banco SQLite');
-        this.createTables().then(resolve).catch(reject);
+        this.createTables().then(() => {
+          // Inicializar otimizador após criar tabelas
+          this.optimizer = new DatabaseOptimizer(this);
+          return this.optimizer.initialize();
+        }).then(resolve).catch(reject);
       });
     });
   }
@@ -388,7 +394,7 @@ class Database {
     });
   }
 
-  // Buscar todas as mensagens
+  // Buscar todas as mensagens (método legado - usar getMessagesPaginated para melhor performance)
   getAllMessages() {
     return new Promise((resolve, reject) => {
       const sql = `
@@ -434,6 +440,58 @@ class Database {
         resolve(messages);
       });
     });
+  }
+
+  // Métodos otimizados usando DatabaseOptimizer
+  async getMessagesPaginated(contact, limit = 50, offset = 0, includeReactions = true) {
+    if (this.optimizer) {
+      return await this.optimizer.getMessagesPaginated(contact, limit, offset, includeReactions);
+    }
+    // Fallback para método não otimizado
+    return this.getAllMessages();
+  }
+
+  async getContactsWithUnreadCount() {
+    if (this.optimizer) {
+      return await this.optimizer.getContactsWithUnreadCount();
+    }
+    // Fallback básico
+    return [];
+  }
+
+  async insertMessagesBatch(messages) {
+    if (this.optimizer) {
+      return await this.optimizer.insertMessagesBatch(messages);
+    }
+    // Fallback: inserir uma por vez
+    for (const message of messages) {
+      await this.saveMessage(message);
+    }
+  }
+
+  async getDatabaseStats() {
+    if (this.optimizer) {
+      return await this.optimizer.getDatabaseStats();
+    }
+    return { error: 'Optimizer not available' };
+  }
+
+  async vacuumDatabase() {
+    if (this.optimizer) {
+      return await this.optimizer.vacuumDatabase();
+    }
+    return new Promise((resolve, reject) => {
+      this.db.run('VACUUM', (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+  }
+
+  clearDatabaseCache() {
+    if (this.optimizer) {
+      this.optimizer.clearCache();
+    }
   }
 
   // Adicionar reação

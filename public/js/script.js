@@ -38,6 +38,141 @@ let mensagensPendentes = new Map(); // Map<tempId, {timestamp, to, message, stat
 let contadorMensagemTemp = 0;
 let estadosDigitacao = {}; // Objeto para rastrear estados de digitação dos contatos
 
+// Sistema de persistência de estado local
+const ESTADO_LOCAL_KEY = 'privapp_estado';
+const ESTADO_EXPIRACAO_MS = 300000; // 5 minutos
+
+// Função para salvar estado no localStorage
+function salvarEstadoLocal() {
+  try {
+    const estado = {
+      mensagensPendentes: Array.from(mensagensPendentes.entries()),
+      contatoSelecionado,
+      naoLidas,
+      mensagensLidas: Array.from(mensagensLidas),
+      scrollPosition,
+      isAutoScrolling,
+      timestamp: Date.now()
+    };
+    localStorage.setItem(ESTADO_LOCAL_KEY, JSON.stringify(estado));
+    console.log('[ESTADO] Estado salvo no localStorage');
+  } catch (error) {
+    console.error('[ESTADO] Erro ao salvar estado:', error);
+  }
+}
+
+// Função para restaurar estado do localStorage
+function restaurarEstadoLocal() {
+  try {
+    const estadoStr = localStorage.getItem(ESTADO_LOCAL_KEY);
+    if (!estadoStr) return false;
+    
+    const estado = JSON.parse(estadoStr);
+    
+    // Verificar se o estado não expirou (5 minutos)
+    if (Date.now() - estado.timestamp > ESTADO_EXPIRACAO_MS) {
+      console.log('[ESTADO] Estado expirado, removendo...');
+      localStorage.removeItem(ESTADO_LOCAL_KEY);
+      return false;
+    }
+    
+    // Restaurar dados
+    if (estado.mensagensPendentes) {
+      mensagensPendentes = new Map(estado.mensagensPendentes);
+    }
+    
+    if (estado.contatoSelecionado) {
+      contatoSelecionado = estado.contatoSelecionado;
+    }
+    
+    if (estado.naoLidas) {
+      naoLidas = estado.naoLidas;
+    }
+    
+    if (estado.mensagensLidas) {
+      mensagensLidas = new Set(estado.mensagensLidas);
+    }
+    
+    if (typeof estado.scrollPosition === 'number') {
+      scrollPosition = estado.scrollPosition;
+    }
+    
+    if (typeof estado.isAutoScrolling === 'boolean') {
+      isAutoScrolling = estado.isAutoScrolling;
+    }
+    
+    console.log('[ESTADO] Estado restaurado do localStorage:', {
+      contatoSelecionado,
+      mensagensPendentes: mensagensPendentes.size,
+      naoLidas: Object.keys(naoLidas).length
+    });
+    
+    return true;
+  } catch (error) {
+    console.error('[ESTADO] Erro ao restaurar estado:', error);
+    localStorage.removeItem(ESTADO_LOCAL_KEY);
+    return false;
+  }
+}
+
+// Função para limpar estado local
+function limparEstadoLocal() {
+  localStorage.removeItem(ESTADO_LOCAL_KEY);
+  console.log('[ESTADO] Estado local limpo');
+}
+
+// Auto-salvar estado a cada mudança importante
+function autoSalvarEstado() {
+  // Debounce para evitar muitas escritas
+  if (autoSalvarEstado.timeout) {
+    clearTimeout(autoSalvarEstado.timeout);
+  }
+  
+  autoSalvarEstado.timeout = setTimeout(() => {
+    salvarEstadoLocal();
+  }, 1000); // Salvar após 1 segundo de inatividade
+}
+
+// Configurar eventos para auto-salvamento
+function setupAutoSaveEvents() {
+  // Salvar quando o contato selecionado mudar
+  const originalSelecionarContato = window.selecionarContato;
+  if (typeof originalSelecionarContato === 'function') {
+    window.selecionarContato = function(contato) {
+      const resultado = originalSelecionarContato.call(this, contato);
+      autoSalvarEstado();
+      return resultado;
+    };
+  }
+  
+  // Salvar quando mensagens não lidas mudarem
+  const originalMarcarMensagensComoLidas = window.marcarMensagensComoLidas;
+  if (typeof originalMarcarMensagensComoLidas === 'function') {
+    window.marcarMensagensComoLidas = function(contato) {
+      const resultado = originalMarcarMensagensComoLidas.call(this, contato);
+      autoSalvarEstado();
+      return resultado;
+    };
+  }
+  
+  // Salvar antes de fechar a página
+  window.addEventListener('beforeunload', () => {
+    salvarEstadoLocal();
+  });
+  
+  // Salvar quando a página perde o foco
+  window.addEventListener('blur', () => {
+    salvarEstadoLocal();
+  });
+  
+  // Salvar periodicamente (a cada 30 segundos)
+  setInterval(() => {
+    salvarEstadoLocal();
+  }, 30000);
+  
+  console.log('[ESTADO] Eventos de auto-salvamento configurados');
+}
+
 // Estados possíveis: 'sending', 'sent', 'delivered', 'read', 'failed'
 function gerarIdTemporario() {
   return `temp_${Date.now()}_${++contadorMensagemTemp}`;
@@ -49,6 +184,9 @@ function adicionarMensagemPendente(tempId, dados) {
     status: 'sending',
     timestamp: Date.now()
   });
+  
+  // Auto-salvar estado após adicionar mensagem pendente
+  autoSalvarEstado();
 }
 
 function atualizarStatusMensagem(tempId, novoStatus, msgId = null) {
@@ -60,6 +198,9 @@ function atualizarStatusMensagem(tempId, novoStatus, msgId = null) {
     }
     // Atualizar interface
     atualizarIndicadorStatus(tempId, novoStatus);
+    
+    // Auto-salvar estado após atualizar status
+    autoSalvarEstado();
   }
 }
 
@@ -97,6 +238,12 @@ function atualizarIndicadorStatus(tempId, status) {
 // Função para inicializar os sistemas de melhoria
 function initializeImprovementSystems() {
   try {
+    // Restaurar estado local primeiro
+    const estadoRestaurado = restaurarEstadoLocal();
+    if (estadoRestaurado) {
+      console.log('[INIT] Estado local restaurado com sucesso');
+    }
+    
     // Inicializar AppState
     appState = new AppState();
     
@@ -108,6 +255,9 @@ function initializeImprovementSystems() {
     
     // Inicializar monitoramento de status do WhatsApp
     initWhatsAppStatusMonitoring();
+    
+    // Configurar auto-salvamento em eventos importantes
+    setupAutoSaveEvents();
     
     console.log('[INIT] Sistemas de melhoria inicializados com sucesso');
   } catch (error) {
@@ -641,6 +791,9 @@ function marcarMensagensComoLidas(contato) {
   
   // Atualiza visualmente o badge
   atualizarBadgeContato(contato, 0);
+  
+  // Auto-salvar estado após marcar como lidas
+  autoSalvarEstado();
 }
 
 // Função para atualizar badge de um contato específico

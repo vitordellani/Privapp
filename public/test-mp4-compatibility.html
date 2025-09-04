@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teste de Compatibilidade MP4</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-section {
+            background: white;
+            margin: 20px 0;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .test-title {
+            color: #25d366;
+            border-bottom: 2px solid #25d366;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+        audio, video {
+            width: 100%;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .result {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        .log {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        button {
+            background: #25d366;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background: #1ea952; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Diagnóstico de Compatibilidade MP4</h1>
+    
+    <!-- Teste 1: Compatibilidade do Navegador -->
+    <div class="test-section">
+        <h2 class="test-title">1. Teste de Compatibilidade do Navegador</h2>
+        <div id="browser-info"></div>
+        <div id="codec-support"></div>
+    </div>
+
+    <!-- Teste 2: Áudio MP4 Direto -->
+    <div class="test-section">
+        <h2 class="test-title">2. Teste de Áudio MP4 Direto</h2>
+        <p>Testando reprodução direta de arquivo MP4 do servidor:</p>
+        <audio id="direct-audio" controls preload="metadata">
+            <source src="/media/media_1757005892725.mp4" type="audio/mp4">
+            <source src="/media/media_1757006015294.mpeg" type="audio/mpeg">
+            <source src="/media/media_1757005891991.ogg" type="audio/ogg">
+            Seu navegador não suporta reprodução de áudio.
+        </audio>
+        <div id="direct-audio-result"></div>
+        <button onclick="testDirectAudio()">Testar Áudio Direto</button>
+    </div>
+
+    <!-- Teste 3: Vídeo MP4 Direto -->
+    <div class="test-section">
+        <h2 class="test-title">3. Teste de Vídeo MP4 Direto</h2>
+        <p>Testando reprodução direta de vídeo MP4:</p>
+        <video id="direct-video" controls preload="metadata">
+            <source src="/media/media_1757015154457.mp4" type="video/mp4">
+            <source src="/media/media_1756919523949.mp4" type="video/mp4">
+            Seu navegador não suporta reprodução de vídeo.
+        </video>
+        <div id="direct-video-result"></div>
+        <button onclick="testDirectVideo()">Testar Vídeo Direto</button>
+    </div>
+
+    <!-- Teste 4: Sistema MediaBubble -->
+    <div class="test-section">
+        <h2 class="test-title">4. Teste do Sistema MediaBubble</h2>
+        <p>Testando o sistema MediaBubble com arquivo MP4:</p>
+        <div id="mediabubble-container"></div>
+        <button onclick="testMediaBubble()">Testar MediaBubble</button>
+        <div id="mediabubble-result"></div>
+    </div>
+
+    <!-- Teste 5: Logs do Sistema -->
+    <div class="test-section">
+        <h2 class="test-title">5. Logs do Sistema</h2>
+        <button onclick="clearLogs()">Limpar Logs</button>
+        <button onclick="exportLogs()">Exportar Logs</button>
+        <div id="system-logs" class="log"></div>
+    </div>
+
+    <script>
+        let logs = [];
+        
+        function log(message, type = 'info') {
+            const timestamp = new Date().toISOString();
+            const logEntry = `[${timestamp}] ${type.toUpperCase()}: ${message}`;
+            logs.push(logEntry);
+            
+            const logsDiv = document.getElementById('system-logs');
+            logsDiv.innerHTML = logs.join('\n');
+            logsDiv.scrollTop = logsDiv.scrollHeight;
+            
+            console.log(logEntry);
+        }
+
+        function showResult(elementId, message, type) {
+            const element = document.getElementById(elementId);
+            element.innerHTML = `<div class="result ${type}">${message}</div>`;
+        }
+
+        // Teste 1: Compatibilidade do Navegador
+        function checkBrowserCompatibility() {
+            const browserInfo = {
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                language: navigator.language,
+                cookieEnabled: navigator.cookieEnabled,
+                onLine: navigator.onLine
+            };
+            
+            document.getElementById('browser-info').innerHTML = `
+                <div class="info">
+                    <strong>Navegador:</strong> ${browserInfo.userAgent}<br>
+                    <strong>Plataforma:</strong> ${browserInfo.platform}<br>
+                    <strong>Idioma:</strong> ${browserInfo.language}<br>
+                    <strong>Online:</strong> ${browserInfo.onLine ? 'Sim' : 'Não'}
+                </div>
+            `;
+            
+            // Testar suporte a codecs
+            const audio = document.createElement('audio');
+            const video = document.createElement('video');
+            
+            const codecSupport = {
+                'audio/mp4': audio.canPlayType('audio/mp4'),
+                'audio/mpeg': audio.canPlayType('audio/mpeg'),
+                'audio/ogg': audio.canPlayType('audio/ogg'),
+                'video/mp4': video.canPlayType('video/mp4'),
+                'video/webm': video.canPlayType('video/webm')
+            };
+            
+            let codecHtml = '<div class="info"><strong>Suporte a Codecs:</strong><br>';
+            for (const [codec, support] of Object.entries(codecSupport)) {
+                const supportText = support === 'probably' ? '✅ Completo' : 
+                                  support === 'maybe' ? '⚠️ Parcial' : '❌ Não suportado';
+                codecHtml += `${codec}: ${supportText}<br>`;
+            }
+            codecHtml += '</div>';
+            
+            document.getElementById('codec-support').innerHTML = codecHtml;
+            log('Compatibilidade do navegador verificada');
+        }
+
+        // Teste 2: Áudio Direto
+        function testDirectAudio() {
+            const audio = document.getElementById('direct-audio');
+            log('Iniciando teste de áudio direto');
+            
+            audio.addEventListener('loadstart', () => log('Áudio: Iniciando carregamento'));
+            audio.addEventListener('loadedmetadata', () => {
+                log(`Áudio: Metadata carregada - Duração: ${audio.duration}s`);
+                showResult('direct-audio-result', 'Metadata carregada com sucesso!', 'success');
+            });
+            audio.addEventListener('canplay', () => {
+                log('Áudio: Pronto para reprodução');
+                showResult('direct-audio-result', 'Áudio pronto para reprodução!', 'success');
+            });
+            audio.addEventListener('error', (e) => {
+                log(`Áudio: Erro - ${e.message || 'Erro desconhecido'}`, 'error');
+                showResult('direct-audio-result', `Erro no áudio: ${e.message || 'Erro desconhecido'}`, 'error');
+            });
+            
+            audio.load();
+        }
+
+        // Teste 3: Vídeo Direto
+        function testDirectVideo() {
+            const video = document.getElementById('direct-video');
+            log('Iniciando teste de vídeo direto');
+            
+            video.addEventListener('loadstart', () => log('Vídeo: Iniciando carregamento'));
+            video.addEventListener('loadedmetadata', () => {
+                log(`Vídeo: Metadata carregada - Duração: ${video.duration}s, Resolução: ${video.videoWidth}x${video.videoHeight}`);
+                showResult('direct-video-result', 'Metadata do vídeo carregada com sucesso!', 'success');
+            });
+            video.addEventListener('canplay', () => {
+                log('Vídeo: Pronto para reprodução');
+                showResult('direct-video-result', 'Vídeo pronto para reprodução!', 'success');
+            });
+            video.addEventListener('error', (e) => {
+                log(`Vídeo: Erro - ${e.message || 'Erro desconhecido'}`, 'error');
+                showResult('direct-video-result', `Erro no vídeo: ${e.message || 'Erro desconhecido'}`, 'error');
+            });
+            
+            video.load();
+        }
+
+        // Teste 4: MediaBubble
+        function testMediaBubble() {
+            log('Iniciando teste do MediaBubble');
+            
+            // Verificar se MediaBubble está disponível
+            if (typeof MediaBubble === 'undefined') {
+                log('MediaBubble não está disponível', 'error');
+                showResult('mediabubble-result', 'MediaBubble não encontrado! Verifique se os scripts estão carregados.', 'error');
+                return;
+            }
+            
+            // Verificar se TempMediaManager está disponível
+            if (typeof tempMediaManager === 'undefined') {
+                log('TempMediaManager não está disponível', 'error');
+                showResult('mediabubble-result', 'TempMediaManager não encontrado!', 'error');
+                return;
+            }
+            
+            // Criar MediaBubble de teste
+            const testMessage = {
+                mediaFilename: 'media_1757005892725.mp4',
+                mimetype: 'audio/mp4',
+                timestamp: Date.now()
+            };
+            
+            try {
+                const mediaBubble = new MediaBubble(testMessage, tempMediaManager, {
+                    onStateChange: (newState, oldState) => {
+                        log(`MediaBubble: Estado ${oldState} → ${newState}`);
+                    },
+                    onDownloadComplete: (mediaData) => {
+                        log('MediaBubble: Download concluído');
+                        showResult('mediabubble-result', 'MediaBubble funcionando corretamente!', 'success');
+                    },
+                    onError: (error) => {
+                        log(`MediaBubble: Erro - ${error.message}`, 'error');
+                        showResult('mediabubble-result', `Erro no MediaBubble: ${error.message}`, 'error');
+                    }
+                });
+                
+                const element = mediaBubble.render();
+                const container = document.getElementById('mediabubble-container');
+                container.innerHTML = '';
+                container.appendChild(element);
+                
+                log('MediaBubble criado e renderizado');
+                
+            } catch (error) {
+                log(`Erro ao criar MediaBubble: ${error.message}`, 'error');
+                showResult('mediabubble-result', `Erro ao criar MediaBubble: ${error.message}`, 'error');
+            }
+        }
+
+        // Utilitários
+        function clearLogs() {
+            logs = [];
+            document.getElementById('system-logs').innerHTML = '';
+        }
+
+        function exportLogs() {
+            const logText = logs.join('\n');
+            const blob = new Blob([logText], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `mp4-compatibility-test-${Date.now()}.log`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // Interceptar logs do console
+        const originalConsoleLog = console.log;
+        const originalConsoleError = console.error;
+        const originalConsoleWarn = console.warn;
+        
+        console.log = function(...args) {
+            if (args[0] && args[0].includes && (args[0].includes('[MB_') || args[0].includes('[TempMediaManager]'))) {
+                log(args.join(' '), 'system');
+            }
+            originalConsoleLog.apply(console, args);
+        };
+        
+        console.error = function(...args) {
+            log(args.join(' '), 'error');
+            originalConsoleError.apply(console, args);
+        };
+        
+        console.warn = function(...args) {
+            log(args.join(' '), 'warn');
+            originalConsoleWarn.apply(console, args);
+        };
+
+        // Inicializar testes automáticos
+        window.addEventListener('DOMContentLoaded', () => {
+            log('Página de teste carregada');
+            checkBrowserCompatibility();
+        });
+    </script>
+    
+    <!-- Carregar scripts do sistema se disponíveis -->
+    <script src="/js/TempMediaManager.js" onerror="log('TempMediaManager.js não carregado', 'warn')"></script>
+    <script src="/js/MediaBubble.js" onerror="log('MediaBubble.js não carregado', 'warn')"></script>
+</body>
+</html>

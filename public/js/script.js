@@ -42,6 +42,11 @@ let estadosDigitacao = {}; // Objeto para rastrear estados de digitação dos co
 let requestManager = null;
 let useParallelRequests = true; // Flag para ativar/desativar paralelização
 
+// Sistema de Download Temporário de Mídia
+let tempMediaManager = null;
+let useTempDownloads = true; // Flag para ativar/desativar downloads temporários
+let mediaBubbles = new Map(); // Map para rastrear componentes MediaBubble ativos
+
 // Configurações de estado local
 const ESTADO_LOCAL_KEY = 'privapp_estado';
 const ESTADO_EXPIRACAO_MS = 300000; // 5 minutos
@@ -457,6 +462,9 @@ function initializeImprovementSystems() {
     // Inicializar sistema de paralelização
     initializeParallelRequests();
     
+    // Inicializar sistema de download temporário
+    initializeTempMediaSystem();
+    
     // Inicializar monitoramento de status do WhatsApp
     initWhatsAppStatusMonitoring();
     
@@ -470,6 +478,239 @@ function initializeImprovementSystems() {
   } catch (error) {
     console.error('[INIT] Erro ao inicializar sistemas de melhoria:', error);
   }
+}
+
+// Função para inicializar o sistema de download temporário
+function initializeTempMediaSystem() {
+  try {
+    // Verificar se as classes estão disponíveis
+    if (typeof TempMediaManager === 'undefined') {
+      console.warn('[TEMP-MEDIA] TempMediaManager não encontrado, usando fallback');
+      useTempDownloads = false;
+      return;
+    }
+    
+    if (typeof MediaBubble === 'undefined') {
+      console.warn('[TEMP-MEDIA] MediaBubble não encontrado, usando fallback');
+      useTempDownloads = false;
+      return;
+    }
+    
+    // Inicializar TempMediaManager
+    tempMediaManager = new TempMediaManager({
+      maxConcurrentDownloads: 3,
+      maxCacheSize: 100 * 1024 * 1024, // 100MB
+      defaultTimeout: 30000,
+      cleanupThreshold: 0.8
+    });
+    
+    console.log('[TEMP-MEDIA] Sistema de download temporário inicializado');
+    
+    // Configurar limpeza ao sair
+    window.addEventListener('beforeunload', () => {
+      cleanupMediaBubbles();
+    });
+    
+    // Monitorar estatísticas periodicamente
+    setInterval(() => {
+      if (tempMediaManager) {
+        const stats = tempMediaManager.getStats();
+        if (stats.totalDownloads > 0) {
+          console.log('[TEMP-MEDIA] Stats:', {
+            downloads: stats.totalDownloads,
+            successRate: stats.successRate + '%',
+            hitRate: stats.hitRate + '%',
+            cacheSize: tempMediaManager.formatFileSize(stats.cacheSize)
+          });
+        }
+      }
+    }, 60000); // A cada minuto
+    
+  } catch (error) {
+    console.error('[TEMP-MEDIA] Erro ao inicializar sistema:', error);
+    useTempDownloads = false;
+  }
+}
+
+// Função para limpar componentes MediaBubble
+function cleanupMediaBubbles() {
+  try {
+    for (const [key, bubble] of mediaBubbles) {
+      if (bubble && typeof bubble.destroy === 'function') {
+        bubble.destroy();
+      }
+    }
+    mediaBubbles.clear();
+    console.log('[TEMP-MEDIA] Componentes MediaBubble limpos');
+  } catch (error) {
+    console.error('[TEMP-MEDIA] Erro ao limpar MediaBubbles:', error);
+  }
+}
+
+// Função para criar balão de mídia com download temporário
+function createMediaBubble(messageData, options = {}) {
+  try {
+    // NOVA LÓGICA: Usar reprodução direta para arquivos MP4
+    if (messageData.mimetype === 'audio/mp4' || messageData.mimetype === 'video/mp4' || 
+        (messageData.mediaFilename && messageData.mediaFilename.toLowerCase().endsWith('.mp4'))) {
+      console.log('[MEDIA-BUBBLE] Arquivo MP4 detectado, usando reprodução direta:', messageData.mediaFilename);
+      return createDirectPlaybackElement(messageData);
+    }
+    
+    // Para outros formatos, usar sistema de download temporário
+    if (!useTempDownloads || !tempMediaManager || typeof MediaBubble === 'undefined') {
+      return createFallbackMediaElement(messageData);
+    }
+    
+    const bubble = new MediaBubble(messageData, tempMediaManager, {
+      enableProgressTracking: true,
+      enableFallback: true,
+      maxRetries: 2,
+      onStateChange: (newState, oldState) => {
+        console.log(`[MEDIA-BUBBLE] ${messageData.mediaFilename}: ${oldState} → ${newState}`);
+      },
+      onDownloadComplete: (mediaData) => {
+        console.log(`[MEDIA-BUBBLE] Download concluído: ${messageData.mediaFilename}`);
+      },
+      onError: (error, options) => {
+        console.error(`[MEDIA-BUBBLE] Erro: ${messageData.mediaFilename}`, error);
+        if (!options.canFallback) {
+          showToast('Erro ao carregar mídia: ' + error.message, 'error');
+        }
+      },
+      ...options
+    });
+    
+    const element = bubble.render();
+    
+    // Armazenar referência para limpeza posterior
+    const bubbleKey = `${messageData.timestamp}_${messageData.mediaFilename}`;
+    mediaBubbles.set(bubbleKey, bubble);
+    
+    return element;
+    
+  } catch (error) {
+    console.error('[MEDIA-BUBBLE] Erro ao criar componente:', error);
+    return createFallbackMediaElement(messageData);
+  }
+}
+
+// Função para reprodução direta de arquivos MP4
+function createDirectPlaybackElement(messageData) {
+  console.log('[DIRECT-PLAYBACK] Criando elemento de reprodução direta:', messageData.mediaFilename);
+  
+  const mediaUrl = `/media/${messageData.mediaFilename}`;
+  const mediaType = messageData.mimetype.startsWith('video/') ? 'video' : 'audio';
+  
+  // Criar container principal
+  const container = document.createElement('div');
+  container.className = 'media-bubble direct-playback';
+  container.setAttribute('data-media-type', mediaType);
+  container.setAttribute('data-filename', messageData.mediaFilename);
+  
+  let mediaHTML = '';
+  
+  if (mediaType === 'video') {
+    mediaHTML = `
+      <div class="media-container video">
+        <video controls class="media-element video-player" preload="metadata">
+          <source src="${mediaUrl}" type="${messageData.mimetype}">
+          Seu navegador não suporta reprodução de vídeo.
+        </video>
+        <div class="media-info">
+          <span class="file-size">📹 Vídeo MP4</span>
+          <span class="playback-mode">Reprodução direta</span>
+        </div>
+      </div>
+    `;
+  } else {
+    mediaHTML = `
+      <div class="media-container audio">
+        <audio controls class="media-element audio-player" preload="metadata">
+          <source src="${mediaUrl}" type="${messageData.mimetype}">
+          Seu navegador não suporta reprodução de áudio.
+        </audio>
+        <div class="media-info">
+          <span class="file-size">🎵 Áudio MP4</span>
+          <span class="playback-mode">Reprodução direta</span>
+        </div>
+      </div>
+    `;
+  }
+  
+  container.innerHTML = mediaHTML;
+  
+  // Adicionar event listeners para logs
+  const mediaElement = container.querySelector(mediaType);
+  if (mediaElement) {
+    mediaElement.addEventListener('loadstart', () => {
+      console.log(`[DIRECT-PLAYBACK] Iniciando carregamento: ${messageData.mediaFilename}`);
+    });
+    
+    mediaElement.addEventListener('loadedmetadata', () => {
+      console.log(`[DIRECT-PLAYBACK] Metadata carregada: ${messageData.mediaFilename}`);
+    });
+    
+    mediaElement.addEventListener('canplay', () => {
+      console.log(`[DIRECT-PLAYBACK] Pronto para reprodução: ${messageData.mediaFilename}`);
+    });
+    
+    mediaElement.addEventListener('error', (e) => {
+      console.error(`[DIRECT-PLAYBACK] Erro no ${mediaType}: ${messageData.mediaFilename}`, e);
+    });
+  }
+  
+  return container;
+}
+
+// Função de fallback para mídia (sistema atual)
+function createFallbackMediaElement(messageData) {
+  const { mediaFilename, mimetype } = messageData;
+  
+  if (!mediaFilename || !mimetype) {
+    return document.createElement('div');
+  }
+  
+  const mediaUrl = `/media/${mediaFilename}`;
+  const container = document.createElement('div');
+  container.className = 'media-fallback';
+  
+  let mediaHTML = '';
+  
+  if (mimetype.startsWith('image/')) {
+    mediaHTML = `
+      <img src="${mediaUrl}" style="max-width:200px;max-height:200px;cursor:pointer;" 
+           onclick="abrirImgModal('${mediaUrl}')" loading="lazy" alt="Imagem">
+      <br>
+      <button type="button" class="btn btn-sm btn-outline-primary mt-1" 
+              onclick="abrirImgModal('${mediaUrl}')">Visualizar imagem</button>
+    `;
+  } else if (mimetype.startsWith('video/')) {
+    mediaHTML = `<video controls preload="metadata"><source src="${mediaUrl}" type="${mimetype}"></video>`;
+  } else if (mimetype.startsWith('audio/')) {
+    mediaHTML = `<audio controls preload="metadata"><source src="${mediaUrl}" type="${mimetype}"></audio>`;
+  } else if (mimetype === 'application/pdf') {
+    mediaHTML = `
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:2em;color:#d32f2f;">📄</span>
+        <div>
+          <div><b>${mediaFilename}</b></div>
+          <button type="button" class="btn btn-sm btn-outline-primary mt-1" 
+                  onclick="abrirPdfModal('${mediaUrl}')">Visualizar PDF</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary mt-1" 
+                  onclick="window.open('${mediaUrl}', '_blank')">Baixar</button>
+        </div>
+      </div>
+    `;
+  } else {
+    mediaHTML = `
+      <button type="button" class="btn btn-sm btn-outline-secondary" 
+              onclick="window.open('${mediaUrl}', '_blank')">Abrir arquivo</button>
+    `;
+  }
+  
+  container.innerHTML = mediaHTML;
+  return container;
 }
 
 // Função para inicializar o monitoramento de status do WhatsApp
@@ -735,22 +976,91 @@ window.showToast = function(message, type = 'info', duration = 3000) {
   }, duration);
 };
 
-// Função para scroll suave para o final
+// Função específica para garantir scroll inicial em nova conversa
+function ensureScrollToBottomOnNewChat() {
+  const messagesContainer = document.querySelector('.messages-container');
+  if (!messagesContainer) return;
+  
+  console.log('[SCROLL] Garantindo scroll inicial para nova conversa');
+  
+  // Múltiplas tentativas para garantir que funcione
+  const forceScroll = () => {
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  };
+  
+  // Scroll imediato
+  forceScroll();
+  
+  // Scroll após renderização
+  requestAnimationFrame(() => {
+    forceScroll();
+    
+    // Para mobile: tentativa adicional
+    if (isMobileView) {
+      setTimeout(() => {
+        forceScroll();
+      }, 100);
+    }
+  });
+  
+  // Garantia final
+  setTimeout(() => {
+    forceScroll();
+    isAutoScrolling = true;
+    updateScrollIndicators();
+  }, 200);
+}
+
+// Função melhorada para scroll para o final - funciona consistentemente em mobile e desktop
 function scrollToBottom(smooth = true) {
   const messagesContainer = document.querySelector('.messages-container');
   if (!messagesContainer) return;
   
-  const scrollOptions = {
-    top: messagesContainer.scrollHeight,
-    behavior: smooth ? 'smooth' : 'auto'
+  // Força scroll para o final com múltiplas estratégias para garantir compatibilidade
+  const scrollToEnd = () => {
+    const maxScroll = messagesContainer.scrollHeight - messagesContainer.clientHeight;
+    
+    // Estratégia 1: scrollTo com options (navegadores modernos)
+    if (messagesContainer.scrollTo) {
+      messagesContainer.scrollTo({
+        top: messagesContainer.scrollHeight,
+        behavior: smooth ? 'smooth' : 'auto'
+      });
+    }
+    
+    // Estratégia 2: scrollTop direto (fallback para dispositivos antigos)
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    
+    // Estratégia 3: Verificação e correção (especialmente importante no mobile)
+    setTimeout(() => {
+      if (messagesContainer.scrollTop < maxScroll - 10) {
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      }
+    }, smooth ? 100 : 0);
   };
   
-  messagesContainer.scrollTo(scrollOptions);
+  scrollToEnd();
+  
+  // Para mobile: aguardar um frame adicional para garantir renderização completa
+  if (isMobileView) {
+    requestAnimationFrame(() => {
+      scrollToEnd();
+    });
+  }
+  
   isAutoScrolling = true;
   hasNewMessages = false;
   
   // Atualiza indicadores
   updateScrollIndicators();
+  
+  console.log('[SCROLL] Scroll para o final executado:', {
+    smooth,
+    isMobile: isMobileView,
+    scrollHeight: messagesContainer.scrollHeight,
+    scrollTop: messagesContainer.scrollTop,
+    clientHeight: messagesContainer.clientHeight
+  });
 }
 
 // Função para verificar se está próximo do final
@@ -1837,35 +2147,48 @@ function renderMensagens(filtro = '', carregarAnteriores = false) {
   menuMsgAberto = null;
   msgs.forEach((msg, idx) => {
     let midiaHtml = '';
+    let mediaElement = null;
+    
+    // Usar novo sistema de download temporário se disponível
     if (msg.mediaFilename && msg.mimetype) {
-      const mediaUrl = `/media/${msg.mediaFilename}`;
-      if (msg.mimetype.startsWith('image/')) {
-        midiaHtml = `<br>
-          <img src="${mediaUrl}" style="max-width:200px;max-height:200px;cursor:pointer;" onclick="abrirImgModal('${mediaUrl}')">
-          <br>
-          <button type="button" class="btn btn-sm btn-outline-primary mt-1" onclick="abrirImgModal('${mediaUrl}')">Visualizar imagem</button>
-        `;
-      } else if (msg.mimetype.startsWith('video/')) {
-        midiaHtml = `<br><video controls><source src="${mediaUrl}" type="${msg.mimetype}"></video>`;
-      } else if (msg.mimetype.startsWith('audio/')) {
-        midiaHtml = `<br><audio controls><source src="${mediaUrl}" type="${msg.mimetype}"></audio>`;
-      } else if (msg.mimetype === 'application/pdf') {
-        // Detectar Safari/iOS para evitar downloads automáticos
-        const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent) || /iPad|iPhone|iPod/.test(navigator.userAgent);
-        
-        midiaHtml = `
-          <div style="display:flex;align-items:center;gap:10px;">
-            <span style="font-size:2em;color:#d32f2f;">📄</span>
-            <div>
-              <div><b>${msg.mediaFilename}</b></div>
-              <button type="button" class="btn btn-sm btn-outline-primary mt-1" onclick="abrirPdfModal('${mediaUrl}')">Visualizar PDF</button>
-              <button type="button" class="btn btn-sm btn-outline-secondary mt-1" onclick="window.open('${mediaUrl}', '_blank')">Baixar</button>
-            </div>
-          </div>
-          <div class="mt-2 text-muted"><small>Use "Visualizar PDF" para ver o arquivo</small></div>
-        `;
-      } else {
-        // Para arquivos não reconhecidos, evitar downloads automáticos em todos os navegadores
+      try {
+        mediaElement = createMediaBubble(msg);
+        if (mediaElement) {
+          // Elemento criado com sucesso, será inserido diretamente no DOM
+          midiaHtml = '<div class="temp-media-placeholder"></div>';
+        } else {
+          // Fallback para sistema antigo
+          const mediaUrl = `/media/${msg.mediaFilename}`;
+          if (msg.mimetype.startsWith('image/')) {
+            midiaHtml = `<br>
+              <img src="${mediaUrl}" style="max-width:200px;max-height:200px;cursor:pointer;" onclick="abrirImgModal('${mediaUrl}')" loading="lazy">
+              <br>
+              <button type="button" class="btn btn-sm btn-outline-primary mt-1" onclick="abrirImgModal('${mediaUrl}')">Visualizar imagem</button>
+            `;
+          } else if (msg.mimetype.startsWith('video/')) {
+            midiaHtml = `<br><video controls preload="metadata"><source src="${mediaUrl}" type="${msg.mimetype}"></video>`;
+          } else if (msg.mimetype.startsWith('audio/')) {
+            midiaHtml = `<br><audio controls preload="metadata"><source src="${mediaUrl}" type="${msg.mimetype}"></audio>`;
+          } else if (msg.mimetype === 'application/pdf') {
+            midiaHtml = `
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span style="font-size:2em;color:#d32f2f;">📄</span>
+                <div>
+                  <div><b>${msg.mediaFilename}</b></div>
+                  <button type="button" class="btn btn-sm btn-outline-primary mt-1" onclick="abrirPdfModal('${mediaUrl}')">Visualizar PDF</button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary mt-1" onclick="window.open('${mediaUrl}', '_blank')">Baixar</button>
+                </div>
+              </div>
+              <div class="mt-2 text-muted"><small>Use "Visualizar PDF" para ver o arquivo</small></div>
+            `;
+          } else {
+            midiaHtml = `<br><button type="button" class="btn btn-sm btn-outline-secondary" onclick="window.open('${mediaUrl}', '_blank')">Abrir arquivo</button>`;
+          }
+        }
+      } catch (error) {
+        console.error('[RENDER] Erro ao criar MediaBubble:', error);
+        // Fallback para sistema antigo em caso de erro
+        const mediaUrl = `/media/${msg.mediaFilename}`;
         midiaHtml = `<br><button type="button" class="btn btn-sm btn-outline-secondary" onclick="window.open('${mediaUrl}', '_blank')">Abrir arquivo</button>`;
       }
     }
@@ -2046,22 +2369,174 @@ function renderMensagens(filtro = '', carregarAnteriores = false) {
 </div>`;
   });
 
-  // Gerenciamento inteligente do scroll após renderização
+  // Substituir placeholders pelos elementos MediaBubble com validação completa
+  setTimeout(() => {
+    const substitutionId = `SUB_${Date.now()}`;
+    const placeholders = mensagensDiv.querySelectorAll('.temp-media-placeholder');
+    const mediaMessages = msgs.filter(msg => msg.mediaFilename && msg.mimetype);
+    
+    console.log(`[${substitutionId}] 🔄 Iniciando substituição DOM:`, {
+      totalPlaceholders: placeholders.length,
+      totalMediaMessages: mediaMessages.length,
+      mensagensDivExists: !!mensagensDiv,
+      mensagensDivChildren: mensagensDiv.children.length,
+      timestamp: new Date().toISOString()
+    });
+    
+    if (placeholders.length !== mediaMessages.length) {
+      console.warn(`[${substitutionId}] ⚠️ Descompasso entre placeholders e mensagens:`, {
+        placeholders: placeholders.length,
+        mediaMessages: mediaMessages.length,
+        difference: Math.abs(placeholders.length - mediaMessages.length)
+      });
+    }
+    
+    let successCount = 0;
+    let fallbackCount = 0;
+    let errorCount = 0;
+    
+    // Processar cada placeholder individualmente
+    placeholders.forEach((placeholder, index) => {
+      const placeholderId = `PH_${index}`;
+      
+      try {
+        // Validar placeholder
+        if (!placeholder || !placeholder.parentNode) {
+          throw new Error(`Placeholder ${index} inválido ou sem parent`);
+        }
+        
+        // Encontrar mensagem correspondente
+        let correspondingMsg = null;
+        if (index < mediaMessages.length) {
+          correspondingMsg = mediaMessages[index];
+        } else {
+          // Buscar por atributos do placeholder se disponível
+          const dataFilename = placeholder.getAttribute('data-filename');
+          if (dataFilename) {
+            correspondingMsg = mediaMessages.find(msg => msg.mediaFilename === dataFilename);
+          }
+        }
+        
+        if (!correspondingMsg) {
+          throw new Error(`Nenhuma mensagem encontrada para placeholder ${index}`);
+        }
+        
+        console.log(`[${substitutionId}] 🎯 Processando ${placeholderId}:`, {
+          index: index,
+          filename: correspondingMsg.mediaFilename,
+          mimetype: correspondingMsg.mimetype,
+          placeholderClass: placeholder.className,
+          timestamp: new Date().toISOString()
+        });
+        
+        // Tentar criar MediaBubble
+        const mediaElement = createMediaBubble(correspondingMsg);
+        
+        if (mediaElement && mediaElement.nodeType === Node.ELEMENT_NODE) {
+          console.log(`[${substitutionId}] ✅ MediaBubble criado para ${placeholderId}:`, {
+            elementType: mediaElement.tagName,
+            elementClass: mediaElement.className,
+            hasDataAttributes: mediaElement.hasAttribute('data-debug-id'),
+            childrenCount: mediaElement.children.length
+          });
+          
+          // Substituir no DOM
+          placeholder.parentNode.replaceChild(mediaElement, placeholder);
+          successCount++;
+          
+        } else {
+          throw new Error(`MediaBubble retornou elemento inválido: ${typeof mediaElement}`);
+        }
+        
+      } catch (error) {
+        console.error(`[${substitutionId}] ❌ Erro ao processar ${placeholderId}:`, {
+          error: error.message,
+          index: index,
+          timestamp: new Date().toISOString()
+        });
+        
+        // Aplicar fallback
+        try {
+          if (placeholder && placeholder.parentNode) {
+            // Usar mensagem correspondente ou primeira disponível
+            const msgForFallback = (index < mediaMessages.length) ? mediaMessages[index] : mediaMessages[0];
+            
+            if (msgForFallback) {
+              const fallbackElement = createFallbackMediaElement(msgForFallback);
+              
+              if (fallbackElement && fallbackElement.nodeType === Node.ELEMENT_NODE) {
+                placeholder.parentNode.replaceChild(fallbackElement, placeholder);
+                fallbackCount++;
+                
+                console.log(`[${substitutionId}] 🆘 Fallback aplicado para ${placeholderId}`);
+              } else {
+                throw new Error('Fallback retornou elemento inválido');
+              }
+            } else {
+              throw new Error('Nenhuma mensagem disponível para fallback');
+            }
+          }
+        } catch (fallbackError) {
+          console.error(`[${substitutionId}] 💥 Falha crítica no fallback para ${placeholderId}:`, fallbackError);
+          errorCount++;
+        }
+      }
+    });
+    
+    // Relatório final
+    console.log(`[${substitutionId}] 📊 Substituição DOM concluída:`, {
+      totalPlaceholders: placeholders.length,
+      successCount: successCount,
+      fallbackCount: fallbackCount,
+      errorCount: errorCount,
+      successRate: placeholders.length > 0 ? `${Math.round((successCount / placeholders.length) * 100)}%` : '0%',
+      finalDOMChildren: mensagensDiv.children.length,
+      timestamp: new Date().toISOString()
+    });
+    
+    // Validar DOM final
+    setTimeout(() => {
+      const remainingPlaceholders = mensagensDiv.querySelectorAll('.temp-media-placeholder');
+      if (remainingPlaceholders.length > 0) {
+        console.warn(`[${substitutionId}] ⚠️ ${remainingPlaceholders.length} placeholders não substituídos encontrados`);
+      }
+      
+      const mediaBubbles = mensagensDiv.querySelectorAll('.media-bubble, .media-fallback');
+      console.log(`[${substitutionId}] 🎯 Validação final: ${mediaBubbles.length} elementos de mídia no DOM`);
+    }, 100);
+    
+  }, 50);
+
+  // Gerenciamento melhorado do scroll após renderização
   setTimeout(() => {
     if (messagesContainer) {
-      // Se estava no final ou é a primeira vez carregando, vai para o final
-      if (wasAtBottom || scrollHeight === 0) {
-        scrollToBottom(false); // Scroll instantâneo na primeira carga
-        isAutoScrolling = true;
-      } else {
-        // Tenta restaurar a posição anterior se não estava no final
-        const restored = restaurarScrollContato(contatoSelecionado, mensagensDiv);
-        if (!restored) {
-          // Se não conseguiu restaurar, mantém a posição relativa
-          messagesContainer.scrollTop = scrollTop;
-        }
-        isAutoScrolling = false;
-      }
+      // NOVA LÓGICA CORRIGIDA: Sempre ir para o final ao abrir uma conversa
+       // Ignora completamente posições salvas para garantir experiência consistente
+       if (!carregarAnteriores) {
+         // Nova conversa ou primeira renderização - SEMPRE vai para o final
+         console.log('[renderMensagens] FORÇANDO scroll para o final - nova conversa');
+         scrollToBottom(false); // Scroll instantâneo
+         isAutoScrolling = true;
+         
+         // Garantia tripla para mobile e desktop
+         setTimeout(() => {
+           scrollToBottom(false);
+           if (isMobileView) {
+             setTimeout(() => {
+               scrollToBottom(false);
+             }, 100);
+           }
+         }, 50);
+       } else {
+         // Apenas para carregamento de mensagens anteriores - restaurar posição
+         console.log('[renderMensagens] Restaurando posição anterior - carregamento de mensagens antigas');
+         const restored = restaurarScrollContato(contatoSelecionado, mensagensDiv);
+         if (!restored) {
+           // Se não conseguiu restaurar, mantém a posição relativa
+           messagesContainer.scrollTop = scrollTop;
+         }
+         isAutoScrolling = false;
+       }
       
       // Atualiza os indicadores
       updateScrollIndicators();
@@ -2274,6 +2749,17 @@ function selecionarContato(contato) {
   isAutoScrolling = true;
   hasNewMessages = false;
   scrollPosition = 0;
+  
+  // Forçar scroll para o final em nova conversa (crítico para mobile e desktop)
+  console.log('[selecionarContato] Preparando scroll para nova conversa:', contato);
+  
+  // CRÍTICO: Limpar scroll salvo para garantir que sempre inicie no final
+  sessionStorage.removeItem('scroll_' + contato);
+  
+  // Garantir scroll inicial após renderização das mensagens
+  setTimeout(() => {
+    ensureScrollToBottomOnNewChat();
+  }, 300);
   
   // Atualização imediata da interface visual
   const chatItems = document.querySelectorAll('.chat-item');
@@ -2608,6 +3094,13 @@ function adicionarNovasMensagens() {
     if (wasNearBottom || isAutoScrolling) {
       setTimeout(() => {
         scrollToBottom(true);
+        
+        // Garantia adicional para mobile - scroll em novas mensagens
+        if (isMobileView) {
+          setTimeout(() => {
+            scrollToBottom(false);
+          }, 200);
+        }
       }, 100);
     } else {
       // Indica que há novas mensagens

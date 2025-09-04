@@ -902,6 +902,258 @@ app.get('/api/profile-photo/username/:username', async (req, res) => {
 // Servir arquivos de foto de perfil
 app.use('/profile-photos', express.static(path.join(__dirname, 'profile-photos')));
 
+// === SISTEMA DE DOWNLOAD TEMPORÁRIO DE MÍDIA ===
+
+// Função para gerar hash SHA-256 de arquivo
+const crypto = require('crypto');
+
+async function generateFileHash(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const stream = fs.createReadStream(filePath);
+    
+    stream.on('data', data => hash.update(data));
+    stream.on('end', () => resolve(hash.digest('hex')));
+    stream.on('error', reject);
+  });
+}
+
+// Função para validar nome de arquivo
+function isValidFilename(filename) {
+  // Verificar se não contém caracteres perigosos
+  const dangerousChars = /[<>:"|?*\\]/;
+  if (dangerousChars.test(filename)) return false;
+  
+  // Verificar se não é um path traversal
+  if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) return false;
+  
+  // Verificar tamanho
+  if (filename.length > 255) return false;
+  
+  return true;
+}
+
+// Função para obter tipo MIME
+function getMimeType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  
+  const mimeTypes = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.mp3': 'audio/mpeg',
+    '.wav': 'audio/wav',
+    '.ogg': 'audio/ogg',
+    '.m4a': 'audio/mp4',
+    '.mp4': 'video/mp4',
+    '.webm': 'video/webm',
+    '.avi': 'video/x-msvideo'
+  };
+  
+  return mimeTypes[ext] || 'application/octet-stream';
+}
+
+// Função para verificar se há versão comprimida
+function getCompressedPath(filePath) {
+  const dir = path.dirname(filePath);
+  const filename = path.basename(filePath);
+  const compressedDir = path.join(dir, 'compressed');
+  
+  // Substituir extensão por _compressed.mp3 para áudios
+  if (/\.(wav|ogg|m4a|aac)$/i.test(filename)) {
+    const compressedFilename = filename.replace(/\.(wav|ogg|m4a|aac)$/i, '_compressed.mp3');
+    return path.join(compressedDir, compressedFilename);
+  }
+  
+  return null;
+}
+
+// Rate limiting para downloads
+const downloadRateLimit = new Map();
+const RATE_LIMIT_WINDOW = 60000; // 1 minuto
+const RATE_LIMIT_MAX = 10; // 10 downloads por minuto
+
+function checkRateLimit(userId) {
+  const now = Date.now();
+  const userLimits = downloadRateLimit.get(userId) || [];
+  
+  // Remover entradas antigas
+  const validLimits = userLimits.filter(time => now - time < RATE_LIMIT_WINDOW);
+  
+  if (validLimits.length >= RATE_LIMIT_MAX) {
+    return false;
+  }
+  
+  validLimits.push(now);
+  downloadRateLimit.set(userId, validLimits);
+  return true;
+}
+
+// API para obter metadados de mídia
+app.get('/api/media/info/:filename', requireAuth, async (req, res) => {
+  try {
+    const { filename } = req.params;
+    
+    // Verificações de segurança
+    if (!isValidFilename(filename)) {
+      return res.status(400).json({ 
+        error: 'Nome de arquivo inválido',
+        code: 'INVALID_FILENAME'
+      });
+    }
+    
+    const filePath = path.join(MEDIA_DIR, filename);
+    
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ 
+        error: 'Arquivo não encontrado',
+        code: 'FILE_NOT_FOUND'
+      });
+    }
+    
+    // Obter metadados do arquivo
+    const stats = fs.statSync(filePath);
+    const mimetype = getMimeType(filePath);
+    
+    // Gerar hash para verificação de integridade
+    let hash = null;
+    try {
+      hash = await generateFileHash(filePath);
+    } catch (hashError) {
+      console.warn(`[MEDIA-INFO] Erro ao gerar hash para ${filename}:`, hashError.message);
+    }
+    
+    // Verificar se há versão comprimida disponível
+    const compressedPath = getCompressedPath(filePath);
+    const compressionAvailable = compressedPath && fs.existsSync(compressedPath);
+    let compressedSize = null;
+    
+    if (compressionAvailable) {
+      try {
+        const compressedStats = fs.statSync(compressedPath);
+        compressedSize = compressedStats.size;
+      } catch (e) {
+        console.warn(`[MEDIA-INFO] Erro ao obter stats do arquivo comprimido:`, e.message);
+      }
+    }
+    
+    const response = {
+      filename,
+      size: stats.size,
+      lastModified: stats.mtime.toISOString(),
+      mimetype,
+      hash,
+      compressionAvailable,
+      compressedSize,
+      downloadUrl: `/media/${filename}`,
+      compressedUrl: compressionAvailable ? `/media/compressed/${filename.replace(/\.(wav|ogg|m4a|aac)$/i, '_compressed.mp3')}` : null
+    };
+    
+    console.log(`[MEDIA-INFO] Metadados fornecidos para ${filename}: ${stats.size} bytes`);
+    res.json(response);
+    
+  } catch (error) {
+    console.error('[MEDIA-INFO] Erro ao obter metadados:', error);
+    res.status(500).json({ 
+      error: 'Erro interno do servidor',
+      code: 'INTERNAL_ERROR'
+    });
+  }
+});
+
+// Middleware de verificação de integridade para downloads
+app.use('/media/:filename', async (req, res, next) => {
+  try {
+    const filename = req.params.filename;
+    
+    // Pular middleware para arquivos que não são mídia direta
+    if (filename.includes('compressed') || filename.includes('..')) {
+      return next();
+    }
+    
+    const filePath = path.join(MEDIA_DIR, filename);
+    
+    // Verificações básicas de segurança
+    if (!isValidFilename(filename)) {
+      return res.status(400).json({ 
+        error: 'Nome de arquivo inválido',
+        code: 'INVALID_FILENAME'
+      });
+    }
+    
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ 
+        error: 'Arquivo não encontrado',
+        code: 'FILE_NOT_FOUND'
+      });
+    }
+    
+    // Rate limiting por usuário
+    const userId = req.session?.user?.id;
+    if (userId && !checkRateLimit(userId)) {
+      console.warn(`[MEDIA-SECURITY] Rate limit excedido para usuário ${req.session.user.username}`);
+      return res.status(429).json({ 
+        error: 'Muitas requisições. Tente novamente em alguns minutos.',
+        code: 'RATE_LIMITED',
+        retryAfter: 60
+      });
+    }
+    
+    // Verificar hash se fornecido na query
+    const expectedHash = req.query.hash;
+    if (expectedHash) {
+      try {
+        const actualHash = await generateFileHash(filePath);
+        if (actualHash !== expectedHash) {
+          console.warn(`[MEDIA-SECURITY] Integridade comprometida para ${filename}`, {
+            expected: expectedHash,
+            actual: actualHash,
+            user: req.session?.user?.username,
+            ip: req.ip
+          });
+          
+          return res.status(400).json({ 
+            error: 'Integridade do arquivo comprometida',
+            code: 'INTEGRITY_FAILED',
+            expected: expectedHash,
+            actual: actualHash
+          });
+        }
+        
+        console.log(`[MEDIA-SECURITY] Integridade verificada com sucesso para ${filename}`);
+      } catch (hashError) {
+        console.error(`[MEDIA-SECURITY] Erro na verificação de integridade para ${filename}:`, hashError);
+        return res.status(500).json({ 
+          error: 'Erro na verificação de integridade',
+          code: 'INTEGRITY_CHECK_FAILED'
+        });
+      }
+    }
+    
+    // Headers de segurança
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'self'");
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    
+    // Log de acesso para auditoria
+    console.log(`[MEDIA-ACCESS] ${req.session?.user?.username || 'anonymous'} acessou ${filename}`);
+    
+    next();
+    
+  } catch (error) {
+    console.error('[MEDIA-SECURITY] Erro no middleware de integridade:', error);
+    res.status(500).json({ 
+      error: 'Erro interno do servidor',
+      code: 'MIDDLEWARE_ERROR'
+    });
+  }
+});
+
+// === FIM DO SISTEMA DE DOWNLOAD TEMPORÁRIO ===
+
 // Limpar mensagens
 app.post('/api/clear', async (req, res) => {
   try {

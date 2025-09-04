@@ -599,10 +599,17 @@ body {
 .messages-container {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 20px;
   scroll-behavior: smooth;
   scrollbar-width: thin;
   scrollbar-color: #c1c1c1 transparent;
+  -webkit-overflow-scrolling: touch; /* Scroll suave no iOS */
+  overscroll-behavior: contain; /* Evita scroll bounce */
+  position: relative;
+  height: 100%;
+  /* Garantir que o scroll funcione consistentemente */
+  will-change: scroll-position;
 }
 
 /* Custom scrollbar para webkit browsers */
@@ -4025,3 +4032,562 @@ img[data-src], audio[data-src], video[data-src] {
 }
 
 /* Fim dos estilos de pré-carregamento */
+
+/* ===== SISTEMA DE DOWNLOAD TEMPORÁRIO DE MÍDIA ===== */
+
+/* Estilos para balões de mídia com download progressivo */
+.media-bubble {
+  position: relative;
+  max-width: 300px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  margin: 8px 0;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.media-bubble:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transform: translateY(-1px);
+}
+
+/* Container principal da mídia */
+.media-container {
+  position: relative;
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+}
+
+.media-container.media-loaded {
+  min-height: auto;
+}
+
+/* Estados do container */
+.media-container.error {
+  background: #fff5f5;
+  border-color: #fed7d7;
+}
+
+.media-container.streaming {
+  background: #f0f9ff;
+  border-color: #bae6fd;
+}
+
+/* Placeholder durante download */
+.media-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px;
+  text-align: center;
+  width: 100%;
+}
+
+/* Progresso de download */
+.download-progress {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+}
+
+/* Círculo de progresso */
+.progress-circle {
+  position: relative;
+  width: 60px;
+  height: 60px;
+}
+
+.progress-ring {
+  transform: rotate(-90deg);
+  width: 100%;
+  height: 100%;
+}
+
+.progress-ring-circle {
+  fill: none;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.3s ease;
+}
+
+.progress-ring-circle.active {
+  stroke: #25d366;
+  stroke-dasharray: 157; /* 2 * π * 25 */
+  stroke-dashoffset: 157;
+}
+
+/* Texto de percentual */
+.progress-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 12px;
+  font-weight: 600;
+  color: #25d366;
+  z-index: 2;
+}
+
+/* Informações do download */
+.download-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.media-type-icon {
+  font-size: 24px;
+  opacity: 0.7;
+  margin-bottom: 4px;
+}
+
+.download-status {
+  font-size: 12px;
+  color: #6c757d;
+  font-weight: 500;
+  text-align: center;
+}
+
+.download-details {
+  font-size: 11px;
+  color: #9ca3af;
+  text-align: center;
+  min-height: 16px;
+}
+
+/* Elementos de mídia carregados */
+.media-element {
+  width: 100%;
+  border-radius: 8px;
+  background: #000;
+  transition: all 0.2s ease;
+}
+
+.audio-player {
+  height: 40px;
+  background: transparent;
+}
+
+/* Estilos para reprodução direta MP4 */
+.media-bubble.direct-playback {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 12px;
+  padding: 12px;
+  margin: 8px 0;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.media-bubble.direct-playback .media-container {
+  background: white;
+  border-radius: 8px;
+  padding: 8px;
+  border: 1px solid #dee2e6;
+}
+
+.media-bubble.direct-playback .media-element {
+  width: 100%;
+  border-radius: 6px;
+  outline: none;
+}
+
+.media-bubble.direct-playback .media-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  padding: 4px 8px;
+  background: #f8f9fa;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #6c757d;
+}
+
+.media-bubble.direct-playback .playback-mode {
+  background: #25d366;
+  color: white;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+/* Dark mode para reprodução direta */
+.darkmode .media-bubble.direct-playback {
+  background: #2d3748;
+  border-color: #4a5568;
+}
+
+.darkmode .media-bubble.direct-playback .media-container {
+  background: #1a202c;
+  border-color: #4a5568;
+}
+
+.darkmode .media-bubble.direct-playback .media-info {
+  background: #2d3748;
+  color: #a0aec0;
+}
+
+.darkmode .media-bubble.direct-playback .playback-mode {
+  background: #25d366;
+  color: white;
+}
+
+.video-player {
+  max-height: 200px;
+  width: 100%;
+}
+
+.image-viewer {
+  cursor: pointer;
+  transition: transform 0.2s ease;
+  background: transparent;
+}
+
+.image-viewer:hover {
+  transform: scale(1.02);
+}
+
+/* Informações da mídia */
+.media-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.05);
+  font-size: 11px;
+  color: #6c757d;
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.media-info.streaming {
+  background: rgba(59, 130, 246, 0.1);
+  color: #1d4ed8;
+}
+
+.file-size {
+  font-weight: 500;
+}
+
+.download-time {
+  opacity: 0.7;
+}
+
+.streaming-indicator {
+  font-weight: 600;
+  color: #1d4ed8;
+}
+
+.fallback-note {
+  font-style: italic;
+  opacity: 0.8;
+}
+
+/* Estados de erro */
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px;
+  text-align: center;
+}
+
+.error-icon {
+  font-size: 32px;
+  margin-bottom: 8px;
+  animation: errorShake 0.5s ease-in-out;
+}
+
+.error-message {
+  color: #e53e3e;
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 12px;
+}
+
+.error-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* Botões de ação */
+.retry-button,
+.fallback-button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.retry-button {
+  background: #e53e3e;
+  color: white;
+}
+
+.retry-button:hover {
+  background: #c53030;
+  transform: translateY(-1px);
+}
+
+.fallback-button {
+  background: #3b82f6;
+  color: white;
+}
+
+.fallback-button:hover {
+  background: #2563eb;
+  transform: translateY(-1px);
+}
+
+.btn-icon {
+  font-size: 14px;
+}
+
+/* Animações */
+@keyframes progressFill {
+  from {
+    stroke-dashoffset: 157;
+  }
+  to {
+    stroke-dashoffset: calc(157 - (157 * var(--progress) / 100));
+  }
+}
+
+@keyframes mediaFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes errorShake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  75% { transform: translateX(5px); }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Classe para animação de entrada */
+.fade-in {
+  animation: mediaFadeIn 0.5s ease;
+}
+
+/* Estados visuais baseados no estado do componente */
+.media-bubble.state-initializing .progress-ring-circle.active {
+  stroke: #fbbf24;
+  animation: spin 2s linear infinite;
+}
+
+.media-bubble.state-downloading .progress-ring-circle.active {
+  stroke: #3b82f6;
+}
+
+.media-bubble.state-validating .progress-ring-circle.active {
+  stroke: #8b5cf6;
+}
+
+.media-bubble.state-ready .progress-ring-circle.active {
+  stroke: #10b981;
+}
+
+.media-bubble.state-error .progress-ring-circle.active {
+  stroke: #ef4444;
+}
+
+.media-bubble.state-fallback .progress-ring-circle.active {
+  stroke: #f59e0b;
+}
+
+/* Responsividade para dispositivos móveis */
+@media (max-width: 768px) {
+  .media-bubble {
+    max-width: 250px;
+  }
+  
+  .progress-circle {
+    width: 50px;
+    height: 50px;
+  }
+  
+  .progress-text {
+    font-size: 10px;
+  }
+  
+  .media-type-icon {
+    font-size: 20px;
+  }
+  
+  .download-status {
+    font-size: 11px;
+  }
+  
+  .media-info {
+    padding: 6px 10px;
+    font-size: 10px;
+  }
+  
+  .error-actions {
+    flex-direction: column;
+    width: 100%;
+  }
+  
+  .retry-button,
+  .fallback-button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+/* Modo escuro */
+body.darkmode .media-bubble {
+  background: #2d3748;
+  border-color: #4a5568;
+  color: #e2e8f0;
+}
+
+body.darkmode .media-container.error {
+  background: #742a2a;
+  border-color: #c53030;
+}
+
+body.darkmode .media-container.streaming {
+  background: #1e3a8a;
+  border-color: #3b82f6;
+}
+
+body.darkmode .download-status {
+  color: #a0aec0;
+}
+
+body.darkmode .download-details {
+  color: #718096;
+}
+
+body.darkmode .media-info {
+  background: rgba(255, 255, 255, 0.05);
+  color: #a0aec0;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+body.darkmode .media-info.streaming {
+  background: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+}
+
+body.darkmode .error-message {
+  color: #fc8181;
+}
+
+/* Otimizações de performance */
+.media-bubble {
+  will-change: transform;
+  contain: layout style;
+}
+
+.progress-ring-circle {
+  will-change: stroke-dashoffset;
+}
+
+.media-element {
+  will-change: transform;
+}
+
+/* Estados de carregamento para diferentes tipos de mídia */
+.media-bubble.audio .media-type-icon::before {
+  content: '🎵';
+}
+
+.media-bubble.video .media-type-icon::before {
+  content: '🎬';
+}
+
+.media-bubble.image .media-type-icon::before {
+  content: '🖼️';
+}
+
+.media-bubble.unknown .media-type-icon::before {
+  content: '📄';
+}
+
+/* Indicadores de qualidade */
+.media-quality {
+  font-size: 10px;
+  padding: 2px 6px;
+  background: rgba(37, 211, 102, 0.1);
+  color: #25d366;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+/* Estilos para arquivos desconhecidos */
+.unknown-type {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.file-icon {
+  font-size: 32px;
+  margin-bottom: 8px;
+  opacity: 0.7;
+}
+
+.file-name {
+  font-size: 12px;
+  color: #6c757d;
+  margin-bottom: 12px;
+  word-break: break-all;
+  max-width: 200px;
+}
+
+.download-btn {
+  padding: 8px 16px;
+  background: #25d366;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.download-btn:hover {
+  background: #128c7e;
+  transform: translateY(-1px);
+}
+
+/* Dimensões de imagem */
+.image-dimensions {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+/* ===== FIM DO SISTEMA DE DOWNLOAD TEMPORÁRIO ===== */

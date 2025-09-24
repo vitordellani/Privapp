@@ -786,6 +786,21 @@ app.get('/api/messages', async (req, res) => {
   }
 });
 
+app.post('/api/chats/:chatId/read', requireAuth, async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    if (!chatId) {
+      return res.status(400).json({ error: 'Parametro chatId eh obrigatorio' });
+    }
+
+    const updated = await db.markChatAsRead(chatId);
+    res.json({ chatId, updated });
+  } catch (error) {
+    console.error('Erro ao marcar chat como lido:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
 // API para obter informações do usuário logado
 app.get('/api/user-info', requireAuth, (req, res) => {
   try {

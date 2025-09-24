@@ -225,19 +225,19 @@ function atualizarIndicadorStatus(tempId, status) {
     if (icone) {
       switch (status) {
         case 'sending':
-          icone.innerHTML = '🕐';
+          icone.innerHTML = '&#x23F3;';
           break;
         case 'sent':
-          icone.innerHTML = '✓';
+          icone.innerHTML = '&#x2713;';
           break;
         case 'delivered':
-          icone.innerHTML = '✓✓';
+          icone.innerHTML = '&#x2713;&#x2713;';
           break;
         case 'read':
-          icone.innerHTML = '✓✓';
+          icone.innerHTML = '&#x2713;&#x2713;';
           break;
         case 'failed':
-          icone.innerHTML = '❌';
+          icone.innerHTML = '&#x26A0;&#xFE0F;';
           break;
       }
     }
@@ -2208,39 +2208,43 @@ function renderMensagens(filtro = '', carregarAnteriores = false) {
     const nomeRemetente = isGroup
       ? `<span style="font-size:0.85em;color:#888;">${getNomeContato(msg.senderName || msg.author || msg.from || '')}</span><br>`
       : '';
+    const avatarInitial = (msg.senderName || msg.author || msg.from || '?')
+      .replace(/[^A-Za-z0-9]/g, '')
+      .charAt(0)
+      .toUpperCase() || '?';
     const fotoMsg = msg.photoUrl
       ? `<img src="${msg.photoUrl}" class="rounded-circle me-2" style="width:28px;height:28px;object-fit:cover;vertical-align:top;">`
-      : `<span class="rounded-circle bg-secondary d-inline-block me-2" style="width:28px;height:28px;text-align:center;line-height:28px;color:#fff;vertical-align:top;">👤</span>`;
+      : `<span class="rounded-circle bg-secondary d-inline-block me-2" style="width:28px;height:28px;text-align:center;line-height:28px;color:#fff;vertical-align:top;">${avatarInitial}</span>`;
 
     const optionsBtnId = `msg-options-btn-${idx}`;
     const optionsMenuId = `msg-options-menu-${idx}`;
     const recebidaPrivada = !isGroup && !enviada;
     const optionsBtn = `
-      <button class="msg-options-btn${recebidaPrivada ? ' left' : ''}" id="${optionsBtnId}" title="Mais opções" type="button">⋮</button>
+      <button class="msg-options-btn${recebidaPrivada ? ' left' : ''}" id="${optionsBtnId}" title="Mais opcoes" type="button">&#8943;</button>
       <div class="msg-options-menu" id="${optionsMenuId}">
         <button type="button" onclick="responderMensagem(${msg.timestamp})">
-          <span class="icon">↩️</span>
+          <span class="icon">&#x21A9;&#xFE0F;</span>
           Responder
         </button>
         <button type="button" onclick="encaminharMensagem(${msg.timestamp})">
-          <span class="icon">↗️</span>
+          <span class="icon">&#x2197;&#xFE0F;</span>
           Encaminhar
         </button>
         <button type="button" onclick="copiarTextoMensagem(${msg.timestamp})">
-          <span class="icon">📋</span>
+          <span class="icon">&#x1F4CB;</span>
           Copiar texto
         </button>
         <button type="button" onclick="alternarSelecaoMensagem(${msg.timestamp})">
-          <span class="icon">☑️</span>
+          <span class="icon">&#x2611;&#xFE0F;</span>
           Selecionar
         </button>
         ${msg.sent ? `<button type="button" onclick="deletarMensagem(${msg.timestamp})">
-          <span class="icon">🗑️</span>
+          <span class="icon">&#x1F5D1;&#xFE0F;</span>
           Deletar
         </button>` : ''}
         <button type="button" onclick="mostrarInfoMensagem(${msg.timestamp})">
-          <span class="icon">ℹ️</span>
-          Informações
+          <span class="icon">&#x2139;&#xFE0F;</span>
+          Informacoes
         </button>
       </div>
     `;
@@ -2261,7 +2265,7 @@ function renderMensagens(filtro = '', carregarAnteriores = false) {
     let deliveryStatus = '';
     if (enviada) {
       let statusClass = 'delivered';
-      let statusIcon = '✓✓';
+      let statusIcon = '&#x2713;&#x2713;';
       
       // Verificar se é uma mensagem pendente
       if (msg.tempId && mensagensPendentes.has(msg.tempId)) {
@@ -2269,19 +2273,19 @@ function renderMensagens(filtro = '', carregarAnteriores = false) {
         statusClass = mensagemPendente.status;
         switch (mensagemPendente.status) {
           case 'sending':
-            statusIcon = '🕐';
+            statusIcon = '&#x23F3;';
             break;
           case 'sent':
-            statusIcon = '✓';
+            statusIcon = '&#x2713;';
             break;
           case 'delivered':
-            statusIcon = '✓✓';
+            statusIcon = '&#x2713;&#x2713;';
             break;
           case 'read':
-            statusIcon = '✓✓';
+            statusIcon = '&#x2713;&#x2713;';
             break;
           case 'failed':
-            statusIcon = '❌';
+            statusIcon = '&#x26A0;&#xFE0F;';
             break;
         }
       } else if (msg.status) {
@@ -2289,19 +2293,19 @@ function renderMensagens(filtro = '', carregarAnteriores = false) {
         statusClass = msg.status;
         switch (msg.status) {
           case 'sending':
-            statusIcon = '🕐';
+            statusIcon = '&#x23F3;';
             break;
           case 'sent':
-            statusIcon = '✓';
+            statusIcon = '&#x2713;';
             break;
           case 'delivered':
-            statusIcon = '✓✓';
+            statusIcon = '&#x2713;&#x2713;';
             break;
           case 'read':
-            statusIcon = '✓✓';
+            statusIcon = '&#x2713;&#x2713;';
             break;
           case 'failed':
-            statusIcon = '❌';
+            statusIcon = '&#x26A0;&#xFE0F;';
             break;
         }
       }
@@ -2721,152 +2725,99 @@ function renderMensagens(filtro = '', carregarAnteriores = false) {
 // Seleciona contato
 function selecionarContato(contato) {
   const mensagensDiv = safeGet('mensagens');
-  if (contatoSelecionado && mensagensDiv.parentElement) {
+  if (contatoSelecionado && mensagensDiv && mensagensDiv.parentElement) {
     salvarScrollContato(contatoSelecionado, mensagensDiv.parentElement.scrollTop);
   }
-  
+
   contatoSelecionado = contato;
-  
-  // CRITÉRIO ÚNICO: Badge desaparece APENAS com o clique na conversa
-  // Remover badge imediatamente, sem dependência de scroll ou outros fatores
+  document.dispatchEvent(new CustomEvent('contato-selecionado', { detail: { chatId: contato } }));
+
   naoLidas[contato] = 0;
-  
-  // Marcar todas as mensagens deste contato como lidas imediatamente
+
   todasMensagens.forEach(msg => {
     if ((msg.from === contato || msg.to === contato) && !msg.fromMe) {
       msg.lida = true;
+      msg.isRead = true;
       mensagensLidas.add(msg.timestamp || msg.id);
     }
   });
-  
-  // Forçar marcação como lida em todos os sistemas
+
   if (appState) {
     appState.markChatAsRead(contato);
+  } else {
+    marcarMensagensComoLidas(contato);
   }
-  marcarMensagensComoLidas(contato);
-  
-  // Reset das variáveis de controle de scroll para nova conversa
+
+  if (window.badgeManager) {
+    window.badgeManager.updateBadge(contato, 0);
+  }
+
   isAutoScrolling = true;
   hasNewMessages = false;
   scrollPosition = 0;
-  
-  // Forçar scroll para o final em nova conversa (crítico para mobile e desktop)
-  console.log('[selecionarContato] Preparando scroll para nova conversa:', contato);
-  
-  // CRÍTICO: Limpar scroll salvo para garantir que sempre inicie no final
+
   sessionStorage.removeItem('scroll_' + contato);
-  
-  // Garantir scroll inicial após renderização das mensagens
+
   setTimeout(() => {
     ensureScrollToBottomOnNewChat();
   }, 300);
-  
-  // Atualização imediata da interface visual
+
   const chatItems = document.querySelectorAll('.chat-item');
   chatItems.forEach(item => {
-    // Remover classe active de todos os itens
     item.classList.remove('active');
-    
-    // Verificar se este item corresponde ao contato selecionado
-    const chatNameElement = item.querySelector('.chat-name-text');
-    const contactNumberElement = item.querySelector('.contact-number');
-    
-    let isCurrentChat = false;
-    
-    // Verificar por nome do contato
-    if (chatNameElement) {
-      const displayedName = chatNameElement.textContent.trim();
-      const contactName = getNomeContato(contato, contato);
-      isCurrentChat = displayedName === contactName || displayedName.includes(contato);
-    }
-    
-    // Verificar por número do contato se não encontrou por nome
-    if (!isCurrentChat && contactNumberElement) {
-      isCurrentChat = contactNumberElement.textContent.includes(contato);
-    }
-    
-    // Verificar se o onclick contém o contato (fallback)
-    if (!isCurrentChat && item.onclick) {
-      isCurrentChat = item.onclick.toString().includes(contato);
-    }
-    
-    if (isCurrentChat) {
-      // Adicionar classe active imediatamente
+    const chatIdAttr = item.dataset ? item.dataset.chatId : null;
+    const isCurrent = chatIdAttr === contato;
+    if (isCurrent) {
       item.classList.add('active');
-      
-      // Remover badge imediatamente
       const badge = item.querySelector('.unread-badge');
       if (badge) {
         badge.remove();
       }
     }
   });
-  
-  // Forçar re-renderização para garantir consistência
+
   ultimaRenderizacaoContatos = '';
-  
-  // Atualiza o header do chat
   atualizarHeaderChat(contato);
-  
+
   renderContatos();
   renderMensagens(safeGet('busca').value);
-  let msgs = todasMensagens.filter(m => (m.from === contatoSelecionado || m.to === contatoSelecionado));
-  if (msgs.length > 0) {
-    ultimoTimestampRenderizado = msgs[msgs.length - 1].timestamp;
-  } else {
-    ultimoTimestampRenderizado = null;
-  }
-  
-  // Usar novos sistemas para marcar mensagens como lidas
-  if (appState) {
-    appState.markChatAsRead(contato);
-  } else {
-    marcarMensagensComoLidas(contato);
-  }
-  
-  // Usar novos sistemas para parar notificações
+
+  const mensagensSelecionadas = todasMensagens.filter(m => (m.from === contatoSelecionado || m.to === contatoSelecionado));
+  ultimoTimestampRenderizado = mensagensSelecionadas.length > 0
+    ? mensagensSelecionadas[mensagensSelecionadas.length - 1].timestamp
+    : null;
+
   if (notificationManager) {
     notificationManager.markChatAsViewed(contato);
-  } else {
-    // Fallback para sistema antigo
-    if (notificacaoContinuaTimers[contato]) {
-      clearTimeout(notificacaoContinuaTimers[contato]);
-      notificacaoContinuaTimers[contato] = null;
-    }
+    notificationManager.stopNotifications(contato);
+    notificationManager.setCurrentChat(contato);
   }
-  
-  // Atualizar sistemas de rastreamento
+
   if (messageViewTracker) {
     messageViewTracker.setCurrentChat(contato);
+    messageViewTracker.markChatAsViewed(contato, true);
   }
-  
+
   if (appState) {
     appState.setCurrentChat(contato);
   }
-  
-  if (notificationManager) {
-    notificationManager.setCurrentChat(contato);
-  }
-  
-  // Navega para a área de chat no mobile
+
   if (isMobileView) {
     navigateToChat();
-    
-    // Aguardar navegação e forçar marcação como visualizado
     setTimeout(() => {
       if (messageViewTracker) {
         messageViewTracker.markChatAsViewed(contato, true);
       }
-      
       if (notificationManager) {
         notificationManager.markChatAsViewed(contato);
       }
-      
-      console.log('[selecionarContato] ✅ Chat forçadamente marcado como visualizado no mobile:', contato);
     }, 300);
   }
-  
-  console.log('[selecionarContato] Contato selecionado:', contato);
+
+  if (!appState) {
+    document.dispatchEvent(new CustomEvent('markMessagesAsRead', { detail: { chatId: contato } }));
+    document.dispatchEvent(new CustomEvent('updateBadges', { detail: { chatId: contato, count: 0 } }));
+  }
 }
 
 // Busca de contatos
@@ -3356,17 +3307,18 @@ function fecharPopoverFora(ev) {
 
 // Darkmode
 if (safeGet('toggle-darkmode')) {
-  safeGet('toggle-darkmode').onclick = function() {
+  const darkModeButton = safeGet('toggle-darkmode');
+  darkModeButton.onclick = function() {
     document.body.classList.toggle('darkmode');
     this.classList.toggle('day');
-    this.textContent = document.body.classList.contains('darkmode') ? '☀️' : '🌙';
+    this.textContent = document.body.classList.contains('darkmode') ? '\u2600\uFE0F' : '\uD83C\uDF19';
     localStorage.setItem('darkmode', document.body.classList.contains('darkmode') ? 'on' : 'off');
   };
-  if(localStorage.getItem('darkmode') === 'on') {
+  if (localStorage.getItem('darkmode') === 'on') {
     document.body.classList.add('darkmode');
-    safeGet('toggle-darkmode').classList.add('day');
-    safeGet('toggle-darkmode').textContent = '☀️';
+    darkModeButton.classList.add('day');
   }
+  darkModeButton.textContent = document.body.classList.contains('darkmode') ? '\u2600\uFE0F' : '\uD83C\uDF19';
 }
 
 // Funções utilitárias de scroll

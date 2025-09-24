@@ -11,7 +11,7 @@ class MessageViewTracker {
     this.visibilityObserver = null;
     this.focusObserver = null;
     this.lastViewTime = new Map();
-    this.viewThreshold = 2000; // 2 segundos para considerar como visualizado
+    this.viewThreshold = 500; // 500ms para considerar como visualizado - MELHORIA: Mais responsivo
     
     this.setupVisibilityDetection();
     this.setupFocusDetection();
@@ -144,22 +144,19 @@ class MessageViewTracker {
       return this.currentChat === chatId;
     }
     
-    // No mobile, verificação mais rigorosa
+    // Mobile: verificação simplificada - MELHORIA: Mais permissiva
     const chatAreaSection = document.getElementById('chatAreaSection');
     const isVisible = chatAreaSection && chatAreaSection.classList.contains('show');
     const isCurrentChat = this.currentChat === chatId;
-    const isWindowFocused = document.hasFocus();
-    const isPageVisible = !document.hidden;
     
-    const result = isVisible && isCurrentChat && isWindowFocused && isPageVisible;
+    // Remover verificações de foco que causam problemas
+    const result = isVisible && isCurrentChat;
     
-    console.log('[MessageViewTracker] Chat open check:', {
+    console.log('[MessageViewTracker] Chat open check (simplified):', {
       chatId,
       isMobileView: this.isMobileView,
       isVisible,
       isCurrentChat,
-      isWindowFocused,
-      isPageVisible,
       result
     });
     

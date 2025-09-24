@@ -1,8 +1,7 @@
-/**
- * AppState - Sistema de Estado Centralizado
- * Melhora a sincronização entre componentes e corrige problemas de duplicação
+﻿/**
+ * AppState - gerenciamento centralizado de estado de mensagens e badges.
+ * Responsável por sincronizar leituras, contadores e broadcasts entre abas.
  */
-
 class AppState {
   constructor() {
     this.messages = new Map();
@@ -12,213 +11,316 @@ class AppState {
     this.isMobile = window.innerWidth <= 768;
     this.broadcastChannel = null;
     this.eventListeners = new Map();
-    
+    this.pendingReadSync = new Set();
+    this.legacyReadKeys = new Set();
+
     this.setupBroadcastChannel();
     this.loadPersistedState();
     this.setupEventListeners();
-    
-    console.log('[AppState] Inicializado');
+
+    console.log('[AppState] Initialized');
   }
 
   setupBroadcastChannel() {
-    // Usar BroadcastChannel para sincronizar entre abas
     if ('BroadcastChannel' in window) {
       try {
         this.broadcastChannel = new BroadcastChannel('privapp-state');
-        
         this.broadcastChannel.onmessage = (event) => {
           this.handleBroadcastMessage(event.data);
         };
-        
-        console.log('[AppState] BroadcastChannel configurado');
+        console.log('[AppState] BroadcastChannel ready');
       } catch (error) {
-        console.warn('[AppState] BroadcastChannel não disponível:', error);
+        console.warn('[AppState] BroadcastChannel unavailable:', error);
       }
     }
   }
 
   setupEventListeners() {
-    // Escutar eventos do MessageViewTracker
     document.addEventListener('markMessagesAsRead', (event) => {
-      const { chatId } = event.detail;
-      this.markChatAsRead(chatId);
+      const { chatId } = event.detail || {};
+      if (chatId) {
+        this.markChatAsRead(chatId);
+      }
     });
 
-    // Escutar eventos do NotificationManager
     document.addEventListener('stopNotifications', (event) => {
-      const { chatId } = event.detail;
-      this.stopNotifications(chatId);
+      const { chatId } = event.detail || {};
+      if (chatId) {
+        this.stopNotifications(chatId);
+      }
     });
 
     document.addEventListener('updateBadges', (event) => {
-      const { chatId, count } = event.detail;
-      this.updateBadgeCount(chatId, count);
+      const { chatId, count } = event.detail || {};
+      if (chatId !== undefined && count !== undefined) {
+        this.updateBadgeCount(chatId, count);
+      }
     });
   }
 
   loadPersistedState() {
-    // Carregar estado persistido do localStorage
     try {
-      // Carregar mensagens lidas
       const readStatusData = localStorage.getItem('privapp-read-status');
       if (readStatusData) {
         const readStatusArray = JSON.parse(readStatusData);
         this.readStatus = new Map(readStatusArray);
       }
 
-      // Carregar notificações
       const notificationsData = localStorage.getItem('privapp-notifications');
       if (notificationsData) {
         const notificationsArray = JSON.parse(notificationsData);
         this.notifications = new Map(notificationsArray);
       }
 
-      console.log('[AppState] Estado carregado do localStorage');
+      console.log('[AppState] State restored from storage');
     } catch (error) {
-      console.error('[AppState] Erro ao carregar estado:', error);
+      console.error('[AppState] Failed to restore state:', error);
+      this.readStatus.clear();
+      this.notifications.clear();
     }
   }
 
   persistState() {
-    // Persistir estado no localStorage
     try {
-      // Salvar mensagens lidas
       const readStatusArray = Array.from(this.readStatus.entries());
       localStorage.setItem('privapp-read-status', JSON.stringify(readStatusArray));
 
-      // Salvar notificações
       const notificationsArray = Array.from(this.notifications.entries());
       localStorage.setItem('privapp-notifications', JSON.stringify(notificationsArray));
-
-      console.log('[AppState] Estado persistido no localStorage');
     } catch (error) {
-      console.error('[AppState] Erro ao persistir estado:', error);
+      console.error('[AppState] Failed to persist state:', error);
     }
+  }
+
+  getChatIdForMessage(message) {
+    if (!message) {
+      return null;
+    }
+    if (message.chatId) {
+      return message.chatId;
+    }
+    if (message.fromMe) {
+      return message.to || null;
+    }
+    return message.from || message.to || null;
+  }
+
+  buildLegacyKeys(message) {
+    const keys = [];
+    if (!message) {
+      return keys;
+    }
+    if (message.id) {
+      keys.push(String(message.id));
+    }
+    if (message.timestamp) {
+      keys.push(String(message.timestamp));
+    }
+    const timestamp = message.timestamp || '';
+    if (timestamp || message.from) {
+      keys.push(`${timestamp}_${message.from || ''}`);
+    }
+    if (timestamp || message.to) {
+      keys.push(`${timestamp}_${message.to || ''}`);
+    }
+    if (message.tempId) {
+      keys.push(`temp_${message.tempId}`);
+    }
+    return keys.filter(Boolean);
+  }
+
+  normalizeMessage(raw) {
+    if (!raw) {
+      return null;
+    }
+    const message = { ...raw };
+    message.isRead = Boolean(message.isRead || message.lida);
+    message.readAt = message.readAt || null;
+    message.chatId = this.getChatIdForMessage(message);
+
+    if (!message.isRead && this.legacyReadKeys.size > 0) {
+      const candidateKeys = this.buildLegacyKeys(message);
+      if (candidateKeys.some(key => this.legacyReadKeys.has(key))) {
+        message.isRead = true;
+        message.readAt = message.readAt || new Date().toISOString();
+      }
+    }
+
+    if (message.isRead) {
+      message.lida = true;
+    }
+
+    return message;
   }
 
   setMessages(messages) {
-    // Atualizar mensagens no estado
     this.messages.clear();
-    
-    messages.forEach(msg => {
-      this.messages.set(msg.id, msg);
+
+    const list = Array.isArray(messages) ? messages : [];
+    list.forEach((rawMessage) => {
+      const normalized = this.normalizeMessage(rawMessage);
+      if (!normalized || !normalized.id) {
+        return;
+      }
+      this.messages.set(normalized.id, normalized);
+      if (normalized.isRead) {
+        this.ensureReadStatus(normalized);
+      }
     });
-    
-    console.log('[AppState] Mensagens atualizadas:', this.messages.size);
+
+    this.persistState();
+    console.log(`[AppState] Messages synced: ${this.messages.size}`);
   }
 
   addMessage(message) {
-    // Adicionar nova mensagem
-    if (!this.messages.has(message.id)) {
-      this.messages.set(message.id, message);
-      
-      // Broadcast para outras abas
-      this.broadcastMessage('message-added', { message });
-      
-      console.log('[AppState] Nova mensagem adicionada:', message.id);
+    const normalized = this.normalizeMessage(message);
+    if (!normalized || !normalized.id) {
+      return null;
     }
+
+    const existing = this.messages.get(normalized.id);
+    const isNew = !existing;
+    const merged = isNew ? normalized : { ...existing, ...normalized };
+
+    this.messages.set(merged.id, merged);
+
+    if (merged.isRead) {
+      this.ensureReadStatus(merged);
+    }
+
+    const payload = {
+      messageId: merged.id,
+      updates: merged
+    };
+
+    if (isNew) {
+      this.broadcastMessage('message-added', { message: merged });
+    } else {
+      this.broadcastMessage('message-updated', payload);
+    }
+
+    return merged;
   }
 
   updateMessage(messageId, updates) {
-    // Atualizar mensagem existente
-    const message = this.messages.get(messageId);
-    if (message) {
-      const updatedMessage = { ...message, ...updates };
-      this.messages.set(messageId, updatedMessage);
-      
-      // Broadcast para outras abas
-      this.broadcastMessage('message-updated', { messageId, updates });
-      
-      console.log('[AppState] Mensagem atualizada:', messageId);
+    const current = this.messages.get(messageId);
+    if (!current) {
+      return;
     }
+    const merged = this.normalizeMessage({ ...current, ...updates, id: messageId });
+    this.messages.set(messageId, merged);
+
+    if (merged.isRead) {
+      this.ensureReadStatus(merged);
+    }
+
+    this.broadcastMessage('message-updated', { messageId, updates: merged });
   }
 
-  markMessageAsRead(messageId, chatId) {
-    const readInfo = {
-      timestamp: Date.now(),
-      chatId: chatId
-    };
-    
-    this.readStatus.set(messageId, readInfo);
-    
-    // Persistir estado
-    this.persistState();
-    
-    // Broadcast para outras abas
-    this.broadcastReadStatus(messageId, chatId);
-    
-    console.log('[AppState] Mensagem marcada como lida:', messageId);
+  ensureReadStatus(message) {
+    const chatId = this.getChatIdForMessage(message);
+    if (!chatId) {
+      return;
+    }
+    const readAtIso = message.readAt || new Date().toISOString();
+    this.readStatus.set(message.id, {
+      timestamp: Date.parse(readAtIso) || Date.now(),
+      chatId,
+      readAt: readAtIso
+    });
+  }
+
+  markMessageAsRead(messageId, chatId, options = {}) {
+    const { suppressBroadcast = false, readAt = null, skipPersist = false } = options;
+    const readTimestamp = readAt ? (Date.parse(readAt) || Date.now()) : Date.now();
+    const readAtIso = readAt || new Date(readTimestamp).toISOString();
+
+    const existing = this.messages.get(messageId);
+    if (existing) {
+      this.messages.set(messageId, { ...existing, isRead: true, lida: true, readAt: readAtIso });
+    }
+
+    this.readStatus.set(messageId, {
+      timestamp: readTimestamp,
+      chatId,
+      readAt: readAtIso
+    });
+
+    if (!skipPersist) {
+      this.persistState();
+    }
+
+    if (!suppressBroadcast) {
+      this.broadcastReadStatus(messageId, chatId, readAtIso);
+    }
+
+    console.log('[AppState] Message marked as read:', messageId);
   }
 
   markChatAsRead(chatId) {
-    // Marcar todas as mensagens do chat como lidas
+    if (!chatId) {
+      return;
+    }
+
     let markedCount = 0;
-    
+
     for (const [messageId, message] of this.messages) {
+      if (message.isRead) {
+        continue;
+      }
       if ((message.from === chatId || message.to === chatId) && !message.fromMe) {
-        if (!this.readStatus.has(messageId)) {
-          this.markMessageAsRead(messageId, chatId);
-          markedCount++;
-        }
+        this.markMessageAsRead(messageId, chatId, { skipPersist: true });
+        markedCount += 1;
       }
     }
-    
-    // Atualizar contador de notificações
+
     this.updateBadgeCount(chatId, 0);
-    
-    console.log('[AppState] Chat marcado como lido:', chatId, 'Mensagens:', markedCount);
+    this.persistState();
+
+    if (!this.pendingReadSync.has(chatId)) {
+      this.pendingReadSync.add(chatId);
+      fetch(`/api/chats/${encodeURIComponent(chatId)}/read`, { method: 'POST' })
+        .catch(error => {
+          console.error('[AppState] Failed to sync read state:', error);
+        })
+        .finally(() => {
+          this.pendingReadSync.delete(chatId);
+        });
+    }
+
+    console.log('[AppState] Chat marked as read:', chatId, 'Messages:', markedCount);
   }
 
   isMessageRead(messageId) {
-    return this.readStatus.has(messageId);
+    if (this.readStatus.has(messageId)) {
+      return true;
+    }
+    const message = this.messages.get(messageId);
+    return message ? Boolean(message.isRead) : false;
   }
 
   getUnreadCount(chatId) {
     let count = 0;
-    
-    for (const [messageId, message] of this.messages) {
-      if ((message.from === chatId || message.to === chatId) && 
-          !message.fromMe && 
-          !this.readStatus.has(messageId) &&
-          // Filtrar mensagens de notificação do sistema
-          !(message.body && message.body.includes('Privapp - Nova Mensagem'))) {
-        count++;
+    for (const [, message] of this.messages) {
+      if ((message.from === chatId || message.to === chatId) && !message.fromMe && !message.isRead) {
+        count += 1;
       }
     }
-    
     return count;
   }
 
-  setCurrentChat(chatId) {
-    const previousChat = this.currentChat;
-    this.currentChat = chatId;
-    
-    if (previousChat !== chatId) {
-      // Marcar chat anterior como lido
-      if (previousChat) {
-        this.markChatAsRead(previousChat);
-      }
-      
-      // Broadcast mudança de chat
-      this.broadcastMessage('chat-changed', { 
-        previousChat, 
-        currentChat: chatId 
-      });
-      
-      console.log('[AppState] Chat atual alterado:', previousChat, '→', chatId);
-    }
-  }
-
   updateBadgeCount(chatId, count) {
+    if (chatId === undefined || count === undefined) {
+      return;
+    }
+    const current = this.notifications.get(chatId);
+    if (current === count) {
+      return;
+    }
     this.notifications.set(chatId, count);
-    
-    // Persistir estado
     this.persistState();
-    
-    // Broadcast para outras abas
     this.broadcastMessage('badge-updated', { chatId, count });
-    
-    console.log('[AppState] Badge atualizado:', chatId, 'Count:', count);
+    console.log('[AppState] Badge updated:', chatId, 'Count:', count);
   }
 
   getBadgeCount(chatId) {
@@ -227,75 +329,86 @@ class AppState {
 
   stopNotifications(chatId) {
     this.updateBadgeCount(chatId, 0);
-    
-    // Broadcast para outras abas
     this.broadcastMessage('notifications-stopped', { chatId });
-    
-    console.log('[AppState] Notificações paradas para:', chatId);
   }
 
-  broadcastMessage(type, data) {
-    if (this.broadcastChannel) {
-      try {
-        this.broadcastChannel.postMessage({
-          type,
-          data,
-          timestamp: Date.now(),
-          source: 'privapp'
-        });
-      } catch (error) {
-        console.error('[AppState] Erro ao enviar broadcast:', error);
+  setCurrentChat(chatId) {
+    const previousChat = this.currentChat;
+    this.currentChat = chatId;
+
+    if (previousChat !== chatId) {
+      if (previousChat) {
+        this.markChatAsRead(previousChat);
       }
+      this.broadcastMessage('chat-changed', {
+        previousChat,
+        currentChat: chatId
+      });
+      console.log('[AppState] Current chat changed:', previousChat, '->', chatId);
     }
   }
 
-  broadcastReadStatus(messageId, chatId) {
-    this.broadcastMessage('message-read', { messageId, chatId });
+  broadcastMessage(type, data) {
+    if (!this.broadcastChannel) {
+      return;
+    }
+    try {
+      this.broadcastChannel.postMessage({
+        type,
+        data,
+         timestamp: Date.now(),
+        source: 'privapp'
+      });
+    } catch (error) {
+      console.error('[AppState] Broadcast failed:', error);
+    }
+  }
+
+  broadcastReadStatus(messageId, chatId, readAt) {
+    this.broadcastMessage('message-read', { messageId, chatId, readAt });
   }
 
   handleBroadcastMessage(message) {
-    if (message.source !== 'privapp') return;
-    
+    if (!message || message.source !== 'privapp') {
+      return;
+    }
+
     switch (message.type) {
       case 'message-added':
         this.addMessage(message.data.message);
         break;
-        
       case 'message-updated':
         this.updateMessage(message.data.messageId, message.data.updates);
         break;
-        
       case 'message-read':
-        this.markMessageAsRead(message.data.messageId, message.data.chatId);
+        this.markMessageAsRead(message.data.messageId, message.data.chatId, {
+          suppressBroadcast: true,
+          readAt: message.data.readAt || null,
+          skipPersist: true
+        });
+        this.persistState();
         break;
-        
       case 'chat-changed':
-        this.setCurrentChat(message.data.currentChat);
+        this.currentChat = message.data.currentChat;
         break;
-        
       case 'badge-updated':
         this.updateBadgeCount(message.data.chatId, message.data.count);
         break;
-        
       case 'notifications-stopped':
         this.stopNotifications(message.data.chatId);
         break;
-        
       default:
-        console.log('[AppState] Broadcast não reconhecido:', message.type);
+        console.log('[AppState] Ignored broadcast:', message.type);
     }
   }
 
   getChatMessages(chatId) {
     const messages = [];
-    
-    for (const [messageId, message] of this.messages) {
+    for (const [, message] of this.messages) {
       if (message.from === chatId || message.to === chatId) {
         messages.push(message);
       }
     }
-    
-    // Ordenar por timestamp
     return messages.sort((a, b) => a.timestamp - b.timestamp);
   }
 
@@ -307,6 +420,17 @@ class AppState {
     return Array.from(this.messages.values());
   }
 
+  getAllChats() {
+    const chats = new Set();
+    for (const [, message] of this.messages) {
+      const chatId = this.getChatIdForMessage(message);
+      if (chatId) {
+        chats.add(chatId);
+      }
+    }
+    return Array.from(chats);
+  }
+
   getReadStatus() {
     return new Map(this.readStatus);
   }
@@ -315,32 +439,79 @@ class AppState {
     return new Map(this.notifications);
   }
 
+  migrateLegacyReadStatus(entries) {
+    if (!entries || (entries instanceof Set && entries.size === 0)) {
+      return { total: 0, applied: 0 };
+    }
+
+    const incoming = entries instanceof Set ? entries : new Set(entries);
+    this.legacyReadKeys = new Set(Array.from(incoming, value => String(value)));
+
+    const applied = this.applyLegacyReadsToMessages();
+
+    try {
+      localStorage.removeItem('mensagensLidas');
+    } catch (error) {
+      console.warn('[AppState] Unable to clear legacy storage:', error);
+    }
+
+    console.log('[AppState] Legacy read status migrated:', { total: incoming.size, applied });
+    return { total: incoming.size, applied };
+  }
+
+  applyLegacyReadsToMessages() {
+    if (this.legacyReadKeys.size === 0) {
+      return 0;
+    }
+    let applied = 0;
+    for (const [messageId, message] of this.messages) {
+      if (message.isRead) {
+        continue;
+      }
+      if (this.shouldMarkAsReadFromLegacy(message)) {
+        this.markMessageAsRead(messageId, this.getChatIdForMessage(message), {
+          suppressBroadcast: true,
+          skipPersist: true
+        });
+        applied += 1;
+      }
+    }
+    if (applied > 0) {
+      this.persistState();
+    }
+    return applied;
+  }
+
+  shouldMarkAsReadFromLegacy(message) {
+    if (!message || this.legacyReadKeys.size === 0) {
+      return false;
+    }
+    const candidateKeys = this.buildLegacyKeys(message);
+    return candidateKeys.some(key => this.legacyReadKeys.has(key));
+  }
+
   clearState() {
     this.messages.clear();
     this.readStatus.clear();
     this.notifications.clear();
     this.currentChat = null;
-    
-    // Limpar localStorage
     localStorage.removeItem('privapp-read-status');
     localStorage.removeItem('privapp-notifications');
-    
-    console.log('[AppState] Estado limpo');
+    console.log('[AppState] State cleared');
   }
 
   destroy() {
     if (this.broadcastChannel) {
       this.broadcastChannel.close();
     }
-    
     this.messages.clear();
     this.readStatus.clear();
     this.notifications.clear();
     this.eventListeners.clear();
-    
-    console.log('[AppState] Destruído');
+    this.pendingReadSync.clear();
+    this.legacyReadKeys.clear();
+    console.log('[AppState] Destroyed');
   }
 }
 
-// Exportar para uso global
 window.AppState = AppState;

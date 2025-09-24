@@ -1,4 +1,4 @@
-const sqlite3 = require('sqlite3').verbose();
+﻿const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 
 /**
@@ -122,7 +122,11 @@ class DatabaseOptimizer {
         m.from_me as fromMe, m.sender_name as senderName, 
         m.group_name as groupName, m.photo_url as photoUrl,
         m.media_error as mediaError, m.user_name as userName,
+
         m.user_profile_photo as userProfilePhoto,
+
+        m.is_read as isRead, m.read_at as readAt,
+
         ${includeReactions ? 'GROUP_CONCAT(r.emoji) as reactions_emojis,' : ''}
         ${includeReactions ? 'GROUP_CONCAT(r.user_id) as reactions_users' : ''}
       FROM messages m
@@ -143,6 +147,8 @@ class DatabaseOptimizer {
         const message = {
           ...row,
           fromMe: Boolean(row.fromMe),
+          isRead: Boolean(row.isRead),
+          readAt: row.readAt,
           reactions: []
         };
         
@@ -201,7 +207,7 @@ class DatabaseOptimizer {
         END as contact,
         sender_name,
         MAX(timestamp) as last_message_time,
-        COUNT(CASE WHEN from_me = 0 THEN 1 END) as unread_count,
+        COUNT(CASE WHEN from_me = 0 AND is_read = 0 THEN 1 END) as unread_count,
         (
           SELECT body 
           FROM messages m2 
@@ -246,8 +252,8 @@ class DatabaseOptimizer {
       const statement = this.db.prepare(`
         INSERT OR REPLACE INTO messages 
         (id, from_number, to_number, body, timestamp, media_filename, mimetype, 
-         from_me, sender_name, group_name, photo_url, media_error, user_name, user_profile_photo)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         from_me, sender_name, group_name, photo_url, media_error, user_name, user_profile_photo, is_read, read_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       
       if (statement) {
@@ -263,9 +269,14 @@ class DatabaseOptimizer {
       for (const msg of messages) {
         const {
           id, from, to, body, timestamp, mediaFilename, mimetype,
-          fromMe, senderName, groupName, photoUrl, mediaError, userName, userProfilePhoto
+          fromMe, senderName, groupName, photoUrl, mediaError, userName, userProfilePhoto,
+          isRead: rawIsRead, readAt: rawReadAt
         } = msg;
-        
+
+        const normalizedFromMe = fromMe ? 1 : 0;
+        const initialIsRead = normalizedFromMe ? 1 : (rawIsRead ? 1 : 0);
+        const initialReadAt = initialIsRead ? (rawReadAt || new Date().toISOString()) : null;
+
         await new Promise((resolve, reject) => {
           stmt.run([
             id || `temp_${Date.now()}`,
@@ -275,13 +286,15 @@ class DatabaseOptimizer {
             timestamp || Date.now(),
             mediaFilename,
             mimetype,
-            fromMe ? 1 : 0,
+            normalizedFromMe,
             senderName || 'Unknown',
             groupName,
             photoUrl,
             mediaError,
             userName,
-            userProfilePhoto
+            userProfilePhoto,
+            initialIsRead,
+            initialReadAt
           ], (err) => {
             if (err) {
               reject(err);
@@ -461,3 +474,5 @@ class DatabaseOptimizer {
 }
 
 module.exports = DatabaseOptimizer;
+
+

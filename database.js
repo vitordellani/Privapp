@@ -25,7 +25,7 @@ class Database {
           this.optimizer = new DatabaseOptimizer(this);
           return this.optimizer.initialize();
         }).then(resolve).catch(reject);
-      });
+    });
     });
   }
 
@@ -46,6 +46,9 @@ class Database {
           photo_url TEXT,
           media_error TEXT,
           user_name TEXT,
+          user_profile_photo TEXT,
+          is_read INTEGER DEFAULT 0,
+          read_at DATETIME,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `;
@@ -95,7 +98,7 @@ class Database {
 
       this.db.serialize(() => {
         this.db.run(createMessagesTable, (err) => {
-          if (err) {
+        if (err) {
             console.error('Erro ao criar tabela messages:', err);
             reject(err);
             return;
@@ -125,16 +128,74 @@ class Database {
                   return;
                 }
                 console.log('Tabela whatsapp_notifications criada/verificada');
-                this.createDefaultAdmin().then(resolve).catch(reject);
+                this.ensureMessageColumns()
+                  .then(() => this.createDefaultAdmin())
+                  .then(resolve)
+                  .catch(reject);
               });
             });
           });
-        });
+      });
       });
     });
   }
 
-  // Criar usuário admin padrão
+  ensureMessageColumns() {
+    return new Promise((resolve, reject) => {
+      this.db.all('PRAGMA table_info(messages)', (err, columns) => {
+        if (err) {
+          console.error('Erro ao inspecionar colunas da tabela messages:', err);
+          reject(err);
+          return;
+        }
+
+        const existingColumns = new Set(columns.map(column => column.name));
+        const run = (sql, logMessage) => new Promise((res, rej) => {
+          this.db.run(sql, (error) => {
+            if (error) {
+              console.error('[Database] Erro ao executar comando de migracao:', sql, error);
+              rej(error);
+            } else {
+              if (logMessage) {
+                console.log(logMessage);
+              }
+              res();
+            }
+          });
+        });
+
+        (async () => {
+          try {
+            if (!existingColumns.has('user_profile_photo')) {
+              await run('ALTER TABLE messages ADD COLUMN user_profile_photo TEXT', '[Database] Coluna user_profile_photo adicionada a tabela messages');
+              existingColumns.add('user_profile_photo');
+            }
+
+            if (!existingColumns.has('is_read')) {
+              await run('ALTER TABLE messages ADD COLUMN is_read INTEGER DEFAULT 0', '[Database] Coluna is_read adicionada a tabela messages');
+              existingColumns.add('is_read');
+              await run('UPDATE messages SET is_read = CASE WHEN from_me = 1 THEN 1 ELSE 0 END', '[Database] Coluna is_read inicializada');
+            }
+
+            if (!existingColumns.has('read_at')) {
+              await run('ALTER TABLE messages ADD COLUMN read_at DATETIME', '[Database] Coluna read_at adicionada a tabela messages');
+              existingColumns.add('read_at');
+            }
+
+            if (existingColumns.has('read_at')) {
+              await run('UPDATE messages SET read_at = CURRENT_TIMESTAMP WHERE is_read = 1 AND read_at IS NULL', '[Database] Coluna read_at sincronizada com mensagens lidas');
+            }
+
+            resolve();
+          } catch (migrationError) {
+            reject(migrationError);
+          }
+        })();
+      });
+    });
+  }
+
+// Criar usuário admin padrão
   createDefaultAdmin() {
     return new Promise((resolve, reject) => {
       const bcrypt = require('bcrypt');
@@ -338,7 +399,8 @@ class Database {
     return new Promise((resolve, reject) => {
       const { 
         id, from, to, body, timestamp, mediaFilename, mimetype, 
-        fromMe, senderName, groupName, photoUrl, mediaError, userName, userProfilePhoto 
+        fromMe, senderName, groupName, photoUrl, mediaError, userName, userProfilePhoto,
+        isRead: rawIsRead, readAt: rawReadAt
       } = messageData;
 
       // DEBUG: Verificar dados recebidos
@@ -358,6 +420,9 @@ class Database {
       const validatedSenderName = senderName || 'Unknown';
       const validatedUserName = userName || null;
       const validatedUserProfilePhoto = userProfilePhoto || null;
+      const normalizedFromMe = fromMe ? 1 : 0;
+      const initialIsRead = normalizedFromMe ? 1 : (rawIsRead ? 1 : 0);
+      const initialReadAt = initialIsRead ? (rawReadAt || new Date().toISOString()) : null;
 
       // DEBUG: Verificar dados validados
       console.log('[DEBUG] saveMessage validou:', {
@@ -368,14 +433,15 @@ class Database {
       const sql = `
         INSERT OR REPLACE INTO messages 
         (id, from_number, to_number, body, timestamp, media_filename, mimetype, 
-         from_me, sender_name, group_name, photo_url, media_error, user_name, user_profile_photo)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         from_me, sender_name, group_name, photo_url, media_error, user_name, user_profile_photo, is_read, read_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
       this.db.run(sql, [
-        validatedId, validatedFrom, validatedTo, validatedBody, validatedTimestamp, 
-        mediaFilename, mimetype, fromMe ? 1 : 0, validatedSenderName, 
-        groupName, photoUrl, mediaError, validatedUserName, validatedUserProfilePhoto
+        validatedId, validatedFrom, validatedTo, validatedBody, validatedTimestamp,
+        mediaFilename, mimetype, normalizedFromMe, validatedSenderName,
+        groupName, photoUrl, mediaError, validatedUserName, validatedUserProfilePhoto,
+        initialIsRead, initialReadAt
       ], function(err) {
         if (err) {
           console.error('Erro ao salvar mensagem:', err);
@@ -394,7 +460,34 @@ class Database {
     });
   }
 
-  // Buscar todas as mensagens (método legado - usar getMessagesPaginated para melhor performance)
+  markChatAsRead(chatId) {
+    return new Promise((resolve, reject) => {
+      const sql = [
+        'UPDATE messages',
+        'SET is_read = 1,',
+        '    read_at = COALESCE(read_at, CURRENT_TIMESTAMP)',
+        'WHERE (from_number = ? OR to_number = ?)',
+        '  AND from_me = 0',
+        '  AND is_read = 0'
+      ].join('\n');
+
+      this.db.run(sql, [chatId, chatId], function(err) {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(this.changes || 0);
+      });
+    }).then((changes) => {
+      if (this.optimizer) {
+        this.optimizer.clearCache('contacts_');
+        this.optimizer.clearCache('messages_' + chatId);
+      }
+      return changes;
+    });
+  }
+
+// Buscar todas as mensagens (método legado - usar getMessagesPaginated para melhor performance)
   getAllMessages() {
     return new Promise((resolve, reject) => {
       const sql = `
@@ -404,7 +497,8 @@ class Database {
           m.from_me as fromMe, m.sender_name as senderName, 
           m.group_name as groupName, m.photo_url as photoUrl,
           m.media_error as mediaError, m.user_name as userName,
-          m.user_profile_photo as userProfilePhoto
+          m.user_profile_photo as userProfilePhoto,
+          m.is_read as isRead, m.read_at as readAt
         FROM messages m
         WHERE m.from_number != 'status@broadcast' AND m.to_number != 'status@broadcast'
         ORDER BY m.timestamp ASC
@@ -425,6 +519,8 @@ class Database {
             messages.push({
               ...row,
               fromMe: Boolean(row.fromMe),
+              isRead: Boolean(row.isRead),
+              readAt: row.readAt,
               reactions: reactions
             });
           } catch (error) {
@@ -432,6 +528,8 @@ class Database {
             messages.push({
               ...row,
               fromMe: Boolean(row.fromMe),
+              isRead: Boolean(row.isRead),
+              readAt: row.readAt,
               reactions: []
             });
           }
@@ -828,3 +926,4 @@ class Database {
 }
 
 module.exports = Database;
+

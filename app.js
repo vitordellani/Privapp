@@ -342,6 +342,7 @@ app.get('/', requireAuth, (req, res) => {
 // Arquivos estáticos já configurados acima
 
 let whatsappClient = null;
+let client = null;
 let meuNome = null;
 let meuNumero = null;
 let whatsappStatus = {
@@ -352,7 +353,7 @@ let whatsappStatus = {
 };
 
 // WhatsApp client
-const client = new Client({
+client = new Client({
   authStrategy: new LocalAuth(),
   puppeteer: {
     args: ['--no-sandbox', '--disable-setuid-sandbox']
@@ -364,7 +365,9 @@ const client = new Client({
 });
 whatsappClient = client;
 
-client.on('qr', (qr) => {
+registerWhatsAppEventHandlers(client);
+
+function handleQr(qr) {
   qrcode.generate(qr, { small: true });
   console.log('Escaneie o QR code acima com o WhatsApp!');
   whatsappStatus.status = 'qr_received';
@@ -379,34 +382,42 @@ client.on('qr', (qr) => {
       io.emit('whatsapp-status', { status: 'qr_expired' });
     }
   }, 60000); // 60 segundos - tempo aproximado de expiração do QR
-});
+
+}
+
 
 // Evento de desconexão
-client.on('disconnected', (reason) => {
+function handleDisconnected(reason) {
   console.log('WhatsApp desconectado:', reason);
   whatsappStatus.status = 'disconnected';
   whatsappStatus.lastError = reason;
   whatsappStatus.connectedAt = null;
   io.emit('whatsapp-status', { status: 'disconnected', reason });
-});
+
+}
+
 
 // Evento de falha de autenticação
-client.on('auth_failure', (msg) => {
+function handleAuthFailure(msg) {
   console.error('Falha na autenticação do WhatsApp:', msg);
   whatsappStatus.status = 'auth_failure';
   whatsappStatus.lastError = msg;
   io.emit('whatsapp-status', { status: 'auth_failure', message: msg });
-});
+
+}
+
 
 // Evento de erro
-client.on('error', (err) => {
+function handleClientError(err) {
   console.error('Erro no cliente WhatsApp:', err);
   whatsappStatus.status = 'error';
   whatsappStatus.lastError = err.message;
   io.emit('whatsapp-status', { status: 'error', message: err.message });
-});
 
-client.on('ready', async () => {
+}
+
+
+async function handleReady() {
   console.log('Bot pronto!');
   whatsappStatus.status = 'connected';
   whatsappStatus.lastError = null;
@@ -446,7 +457,28 @@ client.on('ready', async () => {
     }
   }, 15000);
   setTimeout(atualizarFotosGrupos, 15000); // 15 segundos
-});
+
+}
+
+
+
+function registerWhatsAppEventHandlers(targetClient) {
+  if (!targetClient) {
+    return;
+  }
+
+  targetClient.on('qr', handleQr);
+  targetClient.on('disconnected', handleDisconnected);
+  targetClient.on('auth_failure', handleAuthFailure);
+  targetClient.on('error', handleClientError);
+  targetClient.on('ready', handleReady);
+  targetClient.on('message_create', handleMessageCreate);
+  targetClient.on('message', handleMessage);
+  targetClient.on('message_reaction', handleMessageReaction);
+  targetClient.on('chat_state', handleChatState);
+  targetClient.on('change_state', handleChangeState);
+  targetClient.on('loading_screen', handleLoadingScreen);
+}
 
 async function atualizarFotosGrupos() {
   const GROUP_PHOTOS_FILE = path.join(__dirname, 'groupPhotos.json');
@@ -614,7 +646,7 @@ let mensagensEnviadasViaAPI = new Set();
 let mensagensProcessadasViaSocket = new Set();
 
 // Evento para mensagens recebidas (e enviadas pelo próprio bot)
-client.on('message_create', async (msg) => {
+async function handleMessageCreate(msg) {
   // Verifica se a mensagem já foi processada via socket
   const socketKey = `${msg.id?.id}_${Date.now()}`;
   if (mensagensProcessadasViaSocket.has(socketKey)) {
@@ -656,10 +688,12 @@ client.on('message_create', async (msg) => {
     }
     await saveMessage(msg, mediaFilename, mimetype, mediaError);
   }
-});
+
+}
+
 
 // Salva mensagens recebidas (de outros contatos)
-client.on('message', async (msg) => {
+async function handleMessage(msg) {
   // Filtrar mensagens de status@broadcast (stories)
   if (msg.from === 'status@broadcast' || msg.to === 'status@broadcast') {
     console.log('[FILTRO] Mensagem de status@broadcast ignorada:', {
@@ -698,9 +732,11 @@ client.on('message', async (msg) => {
     // Enviar notificações WhatsApp para usuários online
     await sendWhatsAppNotifications(msg);
   }
-});
 
-client.on('message_reaction', async (reaction) => {
+}
+
+
+async function handleMessageReaction(reaction) {
   console.log('[BACKEND][message_reaction][RAW]:', reaction);
 
   // Extração dos campos adaptada para a versão 1.33.2
@@ -740,10 +776,12 @@ client.on('message_reaction', async (reaction) => {
   } catch (error) {
     console.error('[BACKEND][message_reaction] Erro ao processar reação:', error);
   }
-});
+
+}
+
 
 // Listener para eventos de estado de chat (incluindo digitação)
-client.on('chat_state', (state) => {
+function handleChatState(state) {
   console.log('[BACKEND][chat_state] Estado do chat:', state);
   
   try {
@@ -756,10 +794,12 @@ client.on('chat_state', (state) => {
   } catch (error) {
     console.error('[BACKEND][chat_state] Erro ao processar estado do chat:', error);
   }
-});
+
+}
+
 
 // Listener alternativo para eventos de digitação
-client.on('change_state', (state) => {
+function handleChangeState(state) {
   console.log('[BACKEND][change_state] Mudança de estado:', state);
   
   // Este evento pode conter informações sobre digitação
@@ -773,7 +813,9 @@ client.on('change_state', (state) => {
       console.error('[BACKEND][change_state] Erro ao processar estado de digitação:', error);
     }
   }
-});
+
+}
+
 
 // API para buscar mensagens
 app.get('/api/messages', async (req, res) => {
@@ -1241,74 +1283,25 @@ app.post('/api/whatsapp-restart', requireAuth, requireAdmin, async (req, res) =>
     }
     
     // Inicializa um novo cliente
-    const client = new Client({
+    const newClient = new Client({
       authStrategy: new LocalAuth(),
       puppeteer: {
         args: ['--no-sandbox', '--disable-setuid-sandbox']
+      },
+      webVersionCache: {
+        type: 'remote',
+        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html'
       }
     });
-    
-    // Registra os eventos no novo cliente
-    client.on('qr', qr => {
-      qrcode.generate(qr, { small: true });
-      console.log('Escaneie o QR code acima com o WhatsApp!');
-      whatsappStatus.status = 'qr_received';
-      whatsappStatus.lastQRCode = qr;
-      io.emit('whatsapp-status', { status: 'qr_received', qr });
-    });
-    
-    client.on('ready', async () => {
-      console.log('Bot pronto!');
-      whatsappStatus.status = 'connected';
-      whatsappStatus.lastError = null;
-      whatsappStatus.connectedAt = new Date().toISOString();
-      io.emit('whatsapp-status', { status: 'connected' });
-      
-      try {
-        // Usando client.info em vez de client.getMe() na versão 1.33.2
-        if (client.info) {
-          meuNumero = client.info.wid._serialized;
-          meuNome = client.info.pushname || client.info.name || meuNumero;
-        }
-      } catch (e) {
-        meuNome = 'Você';
-        meuNumero = null;
-      }
-    });
-    
-    client.on('disconnected', (reason) => {
-      console.log('WhatsApp desconectado:', reason);
-      whatsappStatus.status = 'disconnected';
-      whatsappStatus.lastError = reason;
-      whatsappStatus.connectedAt = null;
-      io.emit('whatsapp-status', { status: 'disconnected', reason });
-    });
-    
-    client.on('auth_failure', (msg) => {
-      console.error('Falha na autenticação do WhatsApp:', msg);
-      whatsappStatus.status = 'auth_failure';
-      whatsappStatus.lastError = msg;
-      io.emit('whatsapp-status', { status: 'auth_failure', message: msg });
-    });
-    
-    client.on('error', (err) => {
-      console.error('Erro no cliente WhatsApp:', err);
-      whatsappStatus.status = 'error';
-      whatsappStatus.lastError = err.message;
-      io.emit('whatsapp-status', { status: 'error', message: err.message });
-    });
-    
-    // Evento de conexão
-    client.on('loading_screen', (percent, message) => {
-      console.log(`Carregando WhatsApp: ${percent}% - ${message}`);
-      whatsappStatus.status = 'loading';
-      io.emit('whatsapp-status', { status: 'loading', percent, message });
-    });
-    
-    // Inicia o cliente
-    client.initialize();
+
+    client = newClient;
+    whatsappClient = newClient;
+
+    registerWhatsAppEventHandlers(newClient);
+
+    newClient.initialize();
     console.log('Cliente WhatsApp reinicializado');
-    whatsappClient = client;
+
     
     res.json({ success: true, message: 'Cliente WhatsApp reiniciado com sucesso' });
   } catch (error) {
@@ -1816,11 +1809,13 @@ findAvailablePort(3000).then(port => {
 });
 
 // Evento de conexão
-client.on('loading_screen', (percent, message) => {
+function handleLoadingScreen(percent, message) {
   console.log(`Carregando WhatsApp: ${percent}% - ${message}`);
   whatsappStatus.status = 'loading';
   io.emit('whatsapp-status', { status: 'loading', percent, message });
-});
+
+}
+
 
 client.initialize();
 console.log('Cliente WhatsApp inicializado');
